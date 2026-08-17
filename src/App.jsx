@@ -1,4 +1,9 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import {
+  deletePhotoRecord,
+  getAllPhotos,
+  savePhotoRecord,
+} from './photoDatabase.js'
 
 const monthFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'long',
@@ -28,6 +33,56 @@ function App() {
   const [pendingPhoto, setPendingPhoto] = useState(null)
   const [fileError, setFileError] = useState('')
   const fileInputRef = useRef(null)
+  const objectUrlsRef = useRef(new Set())
+
+  function createPhotoUrl(blob) {
+    const url = URL.createObjectURL(blob)
+    objectUrlsRef.current.add(url)
+    return url
+  }
+
+  function releasePhotoUrl(url) {
+    if (url && objectUrlsRef.current.has(url)) {
+      URL.revokeObjectURL(url)
+      objectUrlsRef.current.delete(url)
+    }
+  }
+
+  useEffect(() => {
+    let isCancelled = false
+
+    async function restorePhotos() {
+      try {
+        const photoRecords = await getAllPhotos()
+
+        if (isCancelled) {
+          return
+        }
+
+        const restoredPhotos = {}
+        photoRecords.forEach(({ dateKey, imageBlob }) => {
+          restoredPhotos[dateKey] = createPhotoUrl(imageBlob)
+        })
+        setPhotosByDate(restoredPhotos)
+      } catch (error) {
+        console.error('Could not load photos from IndexedDB:', error)
+      }
+    }
+
+    restorePhotos()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [])
+
+  useEffect(
+    () => () => {
+      objectUrlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+      objectUrlsRef.current.clear()
+    },
+    [],
+  )
 
   const year = visibleMonth.getFullYear()
   const month = visibleMonth.getMonth()
@@ -59,6 +114,7 @@ function App() {
   }
 
   function closeDateModal() {
+    releasePhotoUrl(pendingPhoto?.url)
     setSelectedDate(null)
     setPendingPhoto(null)
     setFileError('')
@@ -87,46 +143,72 @@ function App() {
       return
     }
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      setPendingPhoto(reader.result)
-      setFileError('')
-    }
-    reader.readAsDataURL(file)
+    releasePhotoUrl(pendingPhoto?.url)
+    setPendingPhoto({
+      blob: file,
+      type: file.type,
+      url: createPhotoUrl(file),
+    })
+    setFileError('')
   }
 
-  function savePhoto() {
+  async function savePhoto() {
     const dateKey = getDateKey(
       selectedDate.getFullYear(),
       selectedDate.getMonth(),
       selectedDate.getDate(),
     )
 
-    setPhotosByDate((currentPhotos) => ({
-      ...currentPhotos,
-      [dateKey]: pendingPhoto,
-    }))
-    closeDateModal()
+    try {
+      await savePhotoRecord({
+        dateKey,
+        imageBlob: pendingPhoto.blob,
+        imageType: pendingPhoto.type,
+      })
+
+      setPhotosByDate((currentPhotos) => {
+        releasePhotoUrl(currentPhotos[dateKey])
+        return {
+          ...currentPhotos,
+          [dateKey]: pendingPhoto.url,
+        }
+      })
+      setPendingPhoto(null)
+      setSelectedDate(null)
+      setFileError('')
+    } catch (error) {
+      console.error(`Could not save the photo for ${dateKey}:`, error)
+      setFileError('The photo could not be saved. Please try again.')
+    }
   }
 
   function cancelPhotoSelection() {
+    releasePhotoUrl(pendingPhoto?.url)
     setPendingPhoto(null)
     setFileError('')
   }
 
-  function deletePhoto() {
+  async function deletePhoto() {
     const dateKey = getDateKey(
       selectedDate.getFullYear(),
       selectedDate.getMonth(),
       selectedDate.getDate(),
     )
 
-    setPhotosByDate((currentPhotos) => {
-      const updatedPhotos = { ...currentPhotos }
-      delete updatedPhotos[dateKey]
-      return updatedPhotos
-    })
-    closeDateModal()
+    try {
+      await deletePhotoRecord(dateKey)
+      setPhotosByDate((currentPhotos) => {
+        releasePhotoUrl(currentPhotos[dateKey])
+        const updatedPhotos = { ...currentPhotos }
+        delete updatedPhotos[dateKey]
+        return updatedPhotos
+      })
+      setSelectedDate(null)
+      setFileError('')
+    } catch (error) {
+      console.error(`Could not delete the photo for ${dateKey}:`, error)
+      setFileError('The photo could not be deleted. Please try again.')
+    }
   }
 
   const selectedDateKey = selectedDate
@@ -235,7 +317,7 @@ function App() {
             {(pendingPhoto || savedPhoto) && (
               <div className="photo-preview">
                 <img
-                  src={pendingPhoto || savedPhoto}
+                  src={pendingPhoto?.url || savedPhoto}
                   alt={`Photo for ${fullDateFormatter.format(selectedDate)}`}
                 />
               </div>
