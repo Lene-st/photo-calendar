@@ -52,6 +52,69 @@ body {
   text-align: center;
 }
 
+.calendar-title {
+  min-width: 0;
+}
+
+.date-jump-controls {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.date-jump-controls select,
+.today-button {
+  padding: 7px 10px;
+  border: 1px solid #c9c2b2;
+  border-radius: 3px;
+  color: #566052;
+  background-color: #fffdf8;
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+}
+
+.date-jump-controls select:hover,
+.today-button:hover {
+  border-color: #8b9784;
+  background-color: #f4f3eb;
+}
+
+.date-jump-controls select:focus-visible,
+.today-button:focus-visible {
+  outline: 3px solid rgba(106, 125, 98, 0.3);
+  outline-offset: 2px;
+}
+
+.ratio-control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #737b6e;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ratio-control select {
+  padding: 5px 8px;
+  border: 1px solid #c9c2b2;
+  border-radius: 3px;
+  color: #566052;
+  background-color: #fffdf8;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ratio-control select:focus-visible {
+  outline: 3px solid rgba(106, 125, 98, 0.3);
+  outline-offset: 2px;
+}
+
 .month-button {
   display: inline-flex;
   align-items: center;
@@ -99,7 +162,7 @@ body {
 
 .day-cell {
   box-sizing: border-box;
-  min-height: 112px;
+  aspect-ratio: var(--photo-ratio);
   border-right: 1px solid #e4dfd4;
   border-bottom: 1px solid #e4dfd4;
   background-color: rgba(255, 255, 255, 0.36);
@@ -114,7 +177,7 @@ body {
   display: block;
   overflow: hidden;
   width: 100%;
-  min-height: 112px;
+  height: 100%;
   padding: 12px;
   border: 0;
   color: inherit;
@@ -229,18 +292,122 @@ body {
 }
 
 .photo-preview {
+  display: grid;
+  place-items: center;
   overflow: hidden;
-  height: 250px;
   margin-top: 24px;
-  border: 1px solid #ddd6c8;
-  border-radius: 3px;
-  background-color: #f4f1e9;
 }
 
-.photo-preview img {
+.saved-photo-frame {
+  overflow: hidden;
+  margin: 0 auto;
+  border: 1px solid #ddd6c8;
+  border-radius: 3px;
+  background-color: #e8e4da;
+}
+
+.saved-photo-frame img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+}
+
+.crop-section {
+  margin-top: 24px;
+}
+
+.crop-title {
+  margin: 0 0 10px;
+  color: #566052;
+  font-weight: 700;
+}
+
+.crop-frame {
+  overflow: hidden;
+  margin: 0 auto;
+  border: 2px solid #8b9784;
+  border-radius: 3px;
+  background-color: #e8e4da;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.crop-frame:active {
+  cursor: grabbing;
+}
+
+.crop-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.crop-help {
+  margin: 9px 0 0;
+  color: #858b7f;
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.zoom-control {
+  display: grid;
+  grid-template-columns: auto 30px 1fr 30px 48px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  color: #566052;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.zoom-control input {
+  width: 100%;
+  accent-color: #6f8068;
+  cursor: pointer;
+}
+
+.zoom-control button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid #c9c2b2;
+  border-radius: 3px;
+  color: #566052;
+  background-color: transparent;
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.zoom-control button:hover {
+  border-color: #8b9784;
+  background-color: #f4f3eb;
+}
+
+.zoom-control output {
+  color: #737b6e;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.reset-crop-button {
+  display: block;
+  margin: 12px auto 0;
+  padding: 6px 12px;
+  border: 1px solid #c9c2b2;
+  border-radius: 3px;
+  color: #566052;
+  background-color: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.reset-crop-button:hover {
+  border-color: #8b9784;
+  background-color: #f4f3eb;
 }
 
 .file-error {
@@ -251,6 +418,7 @@ body {
 
 .modal-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 34px;
 }
@@ -296,6 +464,8 @@ body {
 .modal-x-button:focus-visible,
 .add-photo-button:focus-visible,
 .delete-photo-button:focus-visible,
+.reset-crop-button:focus-visible,
+.zoom-control button:focus-visible,
 .close-button:focus-visible {
   outline: 3px solid rgba(106, 125, 98, 0.35);
   outline-offset: 2px;
@@ -311,6 +481,7 @@ body {
   }
 
   .calendar-header {
+    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 8px;
     margin-bottom: 20px;
   }
@@ -323,6 +494,18 @@ body {
     display: none;
   }
 
+  .date-jump-controls {
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 10px;
+  }
+
+  .date-jump-controls select,
+  .today-button {
+    padding: 6px;
+    font-size: 0.76rem;
+  }
+
   .weekday {
     font-size: 0.68rem;
     letter-spacing: 0.04em;
@@ -333,7 +516,6 @@ body {
   }
 
   .date-button {
-    min-height: 68px;
     padding: 6px;
   }
 
@@ -346,4 +528,5 @@ body {
   .date-modal {
     padding: 36px 24px 26px;
   }
+
 }

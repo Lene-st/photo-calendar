@@ -17,11 +17,73 @@ const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
 })
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const monthNames = Array.from({ length: 12 }, (_, month) =>
+  new Intl.DateTimeFormat('en-US', { month: 'long' }).format(
+    new Date(2026, month, 1),
+  ),
+)
+const yearOptions = Array.from({ length: 101 }, (_, index) => 2000 + index)
 const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
+const photoRatios = {
+  '1:1': 1,
+  '4:3': 4 / 3,
+  '3:4': 3 / 4,
+  '16:9': 16 / 9,
+  '9:16': 9 / 16,
+}
 const visibleMonthStorageKey = 'photo-calendar-visible-month'
+const monthSettingsStorageKey = 'calendarMonthSettings'
 
 function getDateKey(year, month, day) {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
+function getMonthKey(year, month) {
+  return `${year}-${String(month + 1).padStart(2, '0')}`
+}
+
+function getInitialMonthSettings() {
+  try {
+    const savedSettings = JSON.parse(
+      localStorage.getItem(monthSettingsStorageKey),
+    )
+    return savedSettings && typeof savedSettings === 'object'
+      ? savedSettings
+      : {}
+  } catch (error) {
+    console.error('Could not read the saved photo ratios:', error)
+    return {}
+  }
+}
+
+function getCropForRatio(crop, ratio) {
+  if (!crop || crop.ratio !== ratio) {
+    return { x: 0.5, y: 0.5, zoom: 1, ratio }
+  }
+
+  return {
+    ...crop,
+    zoom:
+      Number.isFinite(crop.zoom) && crop.zoom >= 1 && crop.zoom <= 3
+        ? crop.zoom
+        : 1,
+  }
+}
+
+function clamp(value) {
+  return Math.min(1, Math.max(0, value))
+}
+
+function getCropImageStyle(crop, ratio) {
+  const effectiveCrop = getCropForRatio(crop, ratio)
+  const extraMovement = (effectiveCrop.zoom - 1) / effectiveCrop.zoom
+  const translateX = (0.5 - effectiveCrop.x) * extraMovement * 100
+  const translateY = (0.5 - effectiveCrop.y) * extraMovement * 100
+
+  return {
+    objectPosition: `${effectiveCrop.x * 100}% ${effectiveCrop.y * 100}%`,
+    transform: `scale(${effectiveCrop.zoom}) translate(${translateX}%, ${translateY}%)`,
+  }
 }
 
 function getInitialVisibleMonth() {
@@ -52,10 +114,12 @@ function App() {
   const [visibleMonth, setVisibleMonth] = useState(getInitialVisibleMonth)
   const [selectedDate, setSelectedDate] = useState(null)
   const [photosByDate, setPhotosByDate] = useState({})
+  const [monthSettings, setMonthSettings] = useState(getInitialMonthSettings)
   const [pendingPhoto, setPendingPhoto] = useState(null)
   const [fileError, setFileError] = useState('')
   const fileInputRef = useRef(null)
   const objectUrlsRef = useRef(new Set())
+  const cropDragRef = useRef(null)
 
   function createPhotoUrl(blob) {
     const url = URL.createObjectURL(blob)
@@ -82,8 +146,13 @@ function App() {
         }
 
         const restoredPhotos = {}
-        photoRecords.forEach(({ dateKey, imageBlob }) => {
-          restoredPhotos[dateKey] = createPhotoUrl(imageBlob)
+        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop }) => {
+          restoredPhotos[dateKey] = {
+            crop,
+            imageBlob,
+            imageType: imageType || imageBlob.type,
+            url: createPhotoUrl(imageBlob),
+          }
         })
         setPhotosByDate(restoredPhotos)
       } catch (error) {
@@ -108,6 +177,13 @@ function App() {
 
   const year = visibleMonth.getFullYear()
   const month = visibleMonth.getMonth()
+  const monthKey = getMonthKey(year, month)
+  const currentPhotoRatio = photoRatios[monthSettings[monthKey]?.photoRatio]
+    ? monthSettings[monthKey].photoRatio
+    : '1:1'
+  const currentPhotoRatioValue = photoRatios[currentPhotoRatio]
+  const cropFrameWidth =
+    currentPhotoRatioValue < 1 ? currentPhotoRatioValue * 320 : 360
 
   useEffect(() => {
     try {
@@ -120,6 +196,17 @@ function App() {
     }
   }, [year, month])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        monthSettingsStorageKey,
+        JSON.stringify(monthSettings),
+      )
+    } catch (error) {
+      console.error('Could not save the photo ratios:', error)
+    }
+  }, [monthSettings])
+
   const firstWeekday = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const calendarDays = [
@@ -131,6 +218,54 @@ function App() {
     setVisibleMonth((currentMonth) =>
       new Date(currentMonth.getFullYear(), currentMonth.getMonth() + offset, 1),
     )
+  }
+
+  function changeYear(event) {
+    setVisibleMonth(new Date(Number(event.target.value), month, 1))
+  }
+
+  function selectMonth(event) {
+    setVisibleMonth(new Date(year, Number(event.target.value), 1))
+  }
+
+  function goToToday() {
+    const currentDate = new Date()
+    setVisibleMonth(
+      new Date(currentDate.getFullYear(), currentDate.getMonth(), 1),
+    )
+  }
+
+  function changePhotoRatio(event) {
+    const photoRatio = event.target.value
+    setMonthSettings((currentSettings) => ({
+      ...currentSettings,
+      [monthKey]: { photoRatio },
+    }))
+  }
+
+  function changeZoom(event) {
+    const zoom = Number(event.target.value)
+    setPendingPhoto((currentPhoto) => ({
+      ...currentPhoto,
+      crop: { ...currentPhoto.crop, zoom },
+    }))
+  }
+
+  function adjustZoom(amount) {
+    setPendingPhoto((currentPhoto) => ({
+      ...currentPhoto,
+      crop: {
+        ...currentPhoto.crop,
+        zoom: Math.min(3, Math.max(1, currentPhoto.crop.zoom + amount)),
+      },
+    }))
+  }
+
+  function resetCrop() {
+    setPendingPhoto((currentPhoto) => ({
+      ...currentPhoto,
+      crop: { x: 0.5, y: 0.5, zoom: 1, ratio: currentPhotoRatio },
+    }))
   }
 
   function isToday(day) {
@@ -148,7 +283,9 @@ function App() {
   }
 
   function closeDateModal() {
-    releasePhotoUrl(pendingPhoto?.url)
+    if (pendingPhoto && !pendingPhoto.usesSavedUrl) {
+      releasePhotoUrl(pendingPhoto.url)
+    }
     setSelectedDate(null)
     setPendingPhoto(null)
     setFileError('')
@@ -177,11 +314,15 @@ function App() {
       return
     }
 
-    releasePhotoUrl(pendingPhoto?.url)
+    if (pendingPhoto && !pendingPhoto.usesSavedUrl) {
+      releasePhotoUrl(pendingPhoto.url)
+    }
     setPendingPhoto({
       blob: file,
+      crop: { x: 0.5, y: 0.5, zoom: 1, ratio: currentPhotoRatio },
       type: file.type,
       url: createPhotoUrl(file),
+      usesSavedUrl: false,
     })
     setFileError('')
   }
@@ -196,15 +337,24 @@ function App() {
     try {
       await savePhotoRecord({
         dateKey,
+        crop: pendingPhoto.crop,
         imageBlob: pendingPhoto.blob,
         imageType: pendingPhoto.type,
       })
 
       setPhotosByDate((currentPhotos) => {
-        releasePhotoUrl(currentPhotos[dateKey])
+        const previousPhoto = currentPhotos[dateKey]
+        if (previousPhoto?.url !== pendingPhoto.url) {
+          releasePhotoUrl(previousPhoto?.url)
+        }
         return {
           ...currentPhotos,
-          [dateKey]: pendingPhoto.url,
+          [dateKey]: {
+            crop: pendingPhoto.crop,
+            imageBlob: pendingPhoto.blob,
+            imageType: pendingPhoto.type,
+            url: pendingPhoto.url,
+          },
         }
       })
       setPendingPhoto(null)
@@ -217,7 +367,9 @@ function App() {
   }
 
   function cancelPhotoSelection() {
-    releasePhotoUrl(pendingPhoto?.url)
+    if (pendingPhoto && !pendingPhoto.usesSavedUrl) {
+      releasePhotoUrl(pendingPhoto.url)
+    }
     setPendingPhoto(null)
     setFileError('')
   }
@@ -232,7 +384,7 @@ function App() {
     try {
       await deletePhotoRecord(dateKey)
       setPhotosByDate((currentPhotos) => {
-        releasePhotoUrl(currentPhotos[dateKey])
+        releasePhotoUrl(currentPhotos[dateKey]?.url)
         const updatedPhotos = { ...currentPhotos }
         delete updatedPhotos[dateKey]
         return updatedPhotos
@@ -242,6 +394,47 @@ function App() {
     } catch (error) {
       console.error(`Could not delete the photo for ${dateKey}:`, error)
       setFileError('The photo could not be deleted. Please try again.')
+    }
+  }
+
+  function adjustSavedPhoto() {
+    setPendingPhoto({
+      blob: savedPhoto.imageBlob,
+      crop: getCropForRatio(savedPhoto.crop, currentPhotoRatio),
+      type: savedPhoto.imageType,
+      url: savedPhoto.url,
+      usesSavedUrl: true,
+    })
+  }
+
+  function startCropDrag(event) {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    cropDragRef.current = {
+      pointerId: event.pointerId,
+      startCrop: pendingPhoto.crop,
+      startX: event.clientX,
+      startY: event.clientY,
+    }
+  }
+
+  function moveCrop(event) {
+    const drag = cropDragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return
+    }
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const x = clamp(drag.startCrop.x - (event.clientX - drag.startX) / bounds.width)
+    const y = clamp(drag.startCrop.y - (event.clientY - drag.startY) / bounds.height)
+    setPendingPhoto((currentPhoto) => ({
+      ...currentPhoto,
+      crop: { ...currentPhoto.crop, x, y },
+    }))
+  }
+
+  function stopCropDrag(event) {
+    if (cropDragRef.current?.pointerId === event.pointerId) {
+      cropDragRef.current = null
     }
   }
 
@@ -268,7 +461,46 @@ function App() {
             <span>Previous</span>
           </button>
 
-          <h1>{monthFormatter.format(visibleMonth)}</h1>
+          <div className="calendar-title">
+            <h1>{monthFormatter.format(visibleMonth)}</h1>
+
+            <div className="date-jump-controls">
+              <select
+                value={month}
+                onChange={selectMonth}
+                aria-label="Choose month"
+              >
+                {monthNames.map((monthName, monthIndex) => (
+                  <option value={monthIndex} key={monthName}>
+                    {monthName}
+                  </option>
+                ))}
+              </select>
+
+              <select value={year} onChange={changeYear} aria-label="Choose year">
+                {yearOptions.map((yearOption) => (
+                  <option value={yearOption} key={yearOption}>
+                    {yearOption}
+                  </option>
+                ))}
+              </select>
+
+              <button className="today-button" type="button" onClick={goToToday}>
+                Today
+              </button>
+            </div>
+
+            <label className="ratio-control">
+              <span>Photo Ratio</span>
+              <select value={currentPhotoRatio} onChange={changePhotoRatio}>
+                {Object.keys(photoRatios).map((ratio) => (
+                  <option value={ratio} key={ratio}>
+                    {ratio}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
 
           <button
             className="month-button"
@@ -289,7 +521,10 @@ function App() {
           ))}
         </div>
 
-        <div className="days-grid">
+        <div
+          className="days-grid"
+          style={{ '--photo-ratio': currentPhotoRatioValue }}
+        >
           {calendarDays.map((day, index) => {
             const dateKey = day ? getDateKey(year, month, day) : null
             const photo = dateKey ? photosByDate[dateKey] : null
@@ -308,7 +543,13 @@ function App() {
                     onClick={() => openDateModal(day)}
                     aria-label={fullDateFormatter.format(new Date(year, month, day))}
                   >
-                    {photo && <img src={photo} alt="" />}
+                    {photo && (
+                      <img
+                        src={photo.url}
+                        alt=""
+                        style={getCropImageStyle(photo.crop, currentPhotoRatio)}
+                      />
+                    )}
                     <time dateTime={dateKey}>{day}</time>
                   </button>
                 )}
@@ -348,14 +589,83 @@ function App() {
               onChange={handlePhotoSelection}
             />
 
-            {(pendingPhoto || savedPhoto) && (
-              <div className="photo-preview">
-                <img
-                  src={pendingPhoto?.url || savedPhoto}
-                  alt={`Photo for ${fullDateFormatter.format(selectedDate)}`}
-                />
+            {pendingPhoto ? (
+              <div className="crop-section">
+                <p className="crop-title">Crop Photo</p>
+                <div
+                  className="crop-frame"
+                  style={{
+                    aspectRatio: currentPhotoRatioValue,
+                    width: `min(100%, ${cropFrameWidth}px)`,
+                  }}
+                  onPointerDown={startCropDrag}
+                  onPointerMove={moveCrop}
+                  onPointerUp={stopCropDrag}
+                  onPointerCancel={stopCropDrag}
+                >
+                  <img
+                    src={pendingPhoto.url}
+                    alt={`Crop preview for ${fullDateFormatter.format(selectedDate)}`}
+                    draggable="false"
+                    style={getCropImageStyle(
+                      pendingPhoto.crop,
+                      currentPhotoRatio,
+                    )}
+                  />
+                </div>
+                <p className="crop-help">Drag the photo to choose the area to keep.</p>
+
+                <div className="zoom-control">
+                  <label htmlFor="photo-zoom">Zoom</label>
+                  <button
+                    type="button"
+                    onClick={() => adjustZoom(-0.05)}
+                    aria-label="Zoom out"
+                  >
+                    −
+                  </button>
+                  <input
+                    id="photo-zoom"
+                    type="range"
+                    min="1"
+                    max="3"
+                    step="0.05"
+                    value={pendingPhoto.crop.zoom}
+                    onInput={changeZoom}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => adjustZoom(0.05)}
+                    aria-label="Zoom in"
+                  >
+                    +
+                  </button>
+                  <output htmlFor="photo-zoom">
+                    {Math.round(pendingPhoto.crop.zoom * 100)}%
+                  </output>
+                </div>
+
+                <button className="reset-crop-button" type="button" onClick={resetCrop}>
+                  Reset
+                </button>
               </div>
-            )}
+            ) : savedPhoto ? (
+              <div className="photo-preview">
+                <div
+                  className="saved-photo-frame"
+                  style={{
+                    aspectRatio: currentPhotoRatioValue,
+                    width: `min(100%, ${cropFrameWidth}px)`,
+                  }}
+                >
+                  <img
+                    src={savedPhoto.url}
+                    alt={`Photo for ${fullDateFormatter.format(selectedDate)}`}
+                    style={getCropImageStyle(savedPhoto.crop, currentPhotoRatio)}
+                  />
+                </div>
+              </div>
+            ) : null}
 
             {fileError && <p className="file-error">{fileError}</p>}
 
@@ -386,13 +696,22 @@ function App() {
                   {savedPhoto ? 'Replace Photo' : 'Add Photo'}
                 </button>
                 {savedPhoto && (
-                  <button
-                    className="delete-photo-button"
-                    type="button"
-                    onClick={deletePhoto}
-                  >
-                    Delete Photo
-                  </button>
+                  <>
+                    <button
+                      className="close-button"
+                      type="button"
+                      onClick={adjustSavedPhoto}
+                    >
+                      Adjust Crop
+                    </button>
+                    <button
+                      className="delete-photo-button"
+                      type="button"
+                      onClick={deletePhoto}
+                    >
+                      Delete Photo
+                    </button>
+                  </>
                 )}
                 <button
                   className="close-button"
