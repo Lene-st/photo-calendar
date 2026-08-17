@@ -56,15 +56,43 @@ function getInitialMonthSettings() {
   }
 }
 
-function getCropForRatio(crop, ratio) {
-  if (!crop || crop.ratio !== ratio) {
-    return { x: 0.5, y: 0.5, zoom: 1, ratio }
+function normalizeRotation(rotation = 0) {
+  return ((rotation % 360) + 360) % 360
+}
+
+function getMinimumZoom(photo, ratio, rotation = 0) {
+  if (!photo?.imageWidth || !photo?.imageHeight) {
+    return 0.5
   }
 
+  const isSideways = normalizeRotation(rotation) % 180 !== 0
+  const imageWidth = isSideways ? photo.imageHeight : photo.imageWidth
+  const imageHeight = isSideways ? photo.imageWidth : photo.imageHeight
+  const frameRatio = photoRatios[ratio]
+  const containScale = Math.min(frameRatio / imageWidth, 1 / imageHeight)
+  const coverScale = Math.max(frameRatio / imageWidth, 1 / imageHeight)
+
+  return coverScale / containScale
+}
+
+function getCropForRatio(crop, ratio) {
+  if (!crop || crop.ratio !== ratio) {
+    const rotation = 0
+    return {
+      x: 0.5,
+      y: 0.5,
+      zoom: 1,
+      rotation,
+      ratio,
+    }
+  }
+
+  const rotation = normalizeRotation(crop.rotation)
   return {
     ...crop,
+    rotation,
     zoom:
-      Number.isFinite(crop.zoom) && crop.zoom >= 1 && crop.zoom <= 3
+      Number.isFinite(crop.zoom) && crop.zoom >= 0.5
         ? crop.zoom
         : 1,
   }
@@ -74,15 +102,60 @@ function clamp(value) {
   return Math.min(1, Math.max(0, value))
 }
 
-function getCropImageStyle(crop, ratio) {
-  const effectiveCrop = getCropForRatio(crop, ratio)
-  const extraMovement = (effectiveCrop.zoom - 1) / effectiveCrop.zoom
-  const translateX = (0.5 - effectiveCrop.x) * extraMovement * 100
-  const translateY = (0.5 - effectiveCrop.y) * extraMovement * 100
+function getPhotoLayout(photo, ratio) {
+  const crop = getCropForRatio(photo?.crop, ratio)
+  const minimumZoom = getMinimumZoom(
+    photo,
+    ratio,
+    crop.rotation,
+  )
+
+  if (!photo?.imageWidth || !photo?.imageHeight) {
+    return {
+      crop,
+      imageStyle: {
+        width: '100%',
+        height: '100%',
+        objectFit: 'cover',
+        transform: 'translate(-50%, -50%)',
+      },
+      wrapperStyle: { inset: 0 },
+    }
+  }
+
+  const isSideways = crop.rotation % 180 !== 0
+  const rotatedWidth = isSideways ? photo.imageHeight : photo.imageWidth
+  const rotatedHeight = isSideways ? photo.imageWidth : photo.imageHeight
+  const imageRatio = rotatedWidth / rotatedHeight
+  const frameRatio = photoRatios[ratio]
+  const sizeMultiplier = crop.zoom / minimumZoom
+  const baseWidth = imageRatio >= frameRatio ? (imageRatio / frameRatio) * 100 : 100
+  const baseHeight = imageRatio >= frameRatio ? 100 : (frameRatio / imageRatio) * 100
+  const width = baseWidth * sizeMultiplier
+  const height = baseHeight * sizeMultiplier
+  const rotatedLayerRatio = (width / height) * frameRatio
 
   return {
-    objectPosition: `${effectiveCrop.x * 100}% ${effectiveCrop.y * 100}%`,
-    transform: `scale(${effectiveCrop.zoom}) translate(${translateX}%, ${translateY}%)`,
+    crop,
+    imageStyle: isSideways
+      ? {
+          width: `${100 / rotatedLayerRatio}%`,
+          height: `${rotatedLayerRatio * 100}%`,
+          transform: `translate(-50%, -50%) rotate(${crop.rotation}deg)`,
+          transformOrigin: 'center',
+        }
+      : {
+          width: '100%',
+          height: '100%',
+          transform: `translate(-50%, -50%) rotate(${crop.rotation}deg)`,
+          transformOrigin: 'center',
+        },
+    wrapperStyle: {
+      width: `${width}%`,
+      height: `${height}%`,
+      left: `${-(width - 100) * crop.x}%`,
+      top: `${-(height - 100) * crop.y}%`,
+    },
   }
 }
 
@@ -146,11 +219,13 @@ function App() {
         }
 
         const restoredPhotos = {}
-        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop }) => {
+        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop, imageWidth, imageHeight }) => {
           restoredPhotos[dateKey] = {
             crop,
             imageBlob,
+            imageHeight,
             imageType: imageType || imageBlob.type,
+            imageWidth,
             url: createPhotoUrl(imageBlob),
           }
         })
@@ -249,6 +324,7 @@ function App() {
       ...currentPhoto,
       crop: { ...currentPhoto.crop, zoom },
     }))
+    setFileError('')
   }
 
   function adjustZoom(amount) {
@@ -256,15 +332,43 @@ function App() {
       ...currentPhoto,
       crop: {
         ...currentPhoto.crop,
-        zoom: Math.min(3, Math.max(1, currentPhoto.crop.zoom + amount)),
+        zoom: Math.min(
+          3,
+          Math.max(0.5, currentPhoto.crop.zoom + amount),
+        ),
       },
     }))
+    setFileError('')
+  }
+
+  function rotatePhoto(amount) {
+    setPendingPhoto((currentPhoto) => {
+      const rotation = normalizeRotation(currentPhoto.crop.rotation + amount)
+
+      return {
+        ...currentPhoto,
+        crop: {
+          ...currentPhoto.crop,
+          x: 0.5,
+          y: 0.5,
+          rotation,
+          zoom: 1,
+        },
+      }
+    })
+    setFileError('')
   }
 
   function resetCrop() {
     setPendingPhoto((currentPhoto) => ({
       ...currentPhoto,
-      crop: { x: 0.5, y: 0.5, zoom: 1, ratio: currentPhotoRatio },
+      crop: {
+        x: 0.5,
+        y: 0.5,
+        zoom: 1,
+        rotation: 0,
+        ratio: currentPhotoRatio,
+      },
     }))
   }
 
@@ -319,12 +423,62 @@ function App() {
     }
     setPendingPhoto({
       blob: file,
-      crop: { x: 0.5, y: 0.5, zoom: 1, ratio: currentPhotoRatio },
+      crop: {
+        x: 0.5,
+        y: 0.5,
+        zoom: 1,
+        rotation: 0,
+        ratio: currentPhotoRatio,
+      },
+      imageHeight: null,
       type: file.type,
+      imageWidth: null,
       url: createPhotoUrl(file),
       usesSavedUrl: false,
     })
     setFileError('')
+  }
+
+  function handlePendingImageLoad(event) {
+    const imageWidth = event.currentTarget.naturalWidth
+    const imageHeight = event.currentTarget.naturalHeight
+
+    setPendingPhoto((currentPhoto) => {
+      if (
+        currentPhoto.imageWidth === imageWidth &&
+        currentPhoto.imageHeight === imageHeight
+      ) {
+        return currentPhoto
+      }
+
+      const photoWithDimensions = {
+        ...currentPhoto,
+        imageHeight,
+        imageWidth,
+      }
+
+      return {
+        ...photoWithDimensions,
+        crop: currentPhoto.crop,
+      }
+    })
+  }
+
+  function rememberPhotoDimensions(dateKey, event) {
+    const imageWidth = event.currentTarget.naturalWidth
+    const imageHeight = event.currentTarget.naturalHeight
+
+    setPhotosByDate((currentPhotos) => {
+      const photo = currentPhotos[dateKey]
+      if (!photo || (photo.imageWidth && photo.imageHeight)) {
+        return currentPhotos
+      }
+
+      return {
+        ...currentPhotos,
+        [dateKey]: { ...photo, imageHeight, imageWidth },
+      }
+    })
   }
 
   async function savePhoto() {
@@ -333,13 +487,14 @@ function App() {
       selectedDate.getMonth(),
       selectedDate.getDate(),
     )
-
     try {
       await savePhotoRecord({
         dateKey,
         crop: pendingPhoto.crop,
         imageBlob: pendingPhoto.blob,
+        imageHeight: pendingPhoto.imageHeight,
         imageType: pendingPhoto.type,
+        imageWidth: pendingPhoto.imageWidth,
       })
 
       setPhotosByDate((currentPhotos) => {
@@ -352,7 +507,9 @@ function App() {
           [dateKey]: {
             crop: pendingPhoto.crop,
             imageBlob: pendingPhoto.blob,
+            imageHeight: pendingPhoto.imageHeight,
             imageType: pendingPhoto.type,
+            imageWidth: pendingPhoto.imageWidth,
             url: pendingPhoto.url,
           },
         }
@@ -401,7 +558,9 @@ function App() {
     setPendingPhoto({
       blob: savedPhoto.imageBlob,
       crop: getCropForRatio(savedPhoto.crop, currentPhotoRatio),
+      imageHeight: savedPhoto.imageHeight,
       type: savedPhoto.imageType,
+      imageWidth: savedPhoto.imageWidth,
       url: savedPhoto.url,
       usesSavedUrl: true,
     })
@@ -446,6 +605,12 @@ function App() {
       )
     : null
   const savedPhoto = selectedDateKey ? photosByDate[selectedDateKey] : null
+  const savedPhotoLayout = savedPhoto
+    ? getPhotoLayout(savedPhoto, currentPhotoRatio)
+    : null
+  const pendingPhotoLayout = pendingPhoto
+    ? getPhotoLayout(pendingPhoto, currentPhotoRatio)
+    : null
 
   return (
     <main className="calendar-page">
@@ -528,6 +693,9 @@ function App() {
           {calendarDays.map((day, index) => {
             const dateKey = day ? getDateKey(year, month, day) : null
             const photo = dateKey ? photosByDate[dateKey] : null
+            const photoLayout = photo
+              ? getPhotoLayout(photo, currentPhotoRatio)
+              : null
 
             return (
               <div
@@ -544,11 +712,17 @@ function App() {
                     aria-label={fullDateFormatter.format(new Date(year, month, day))}
                   >
                     {photo && (
-                      <img
-                        src={photo.url}
-                        alt=""
-                        style={getCropImageStyle(photo.crop, currentPhotoRatio)}
-                      />
+                      <div
+                        className="photo-transform"
+                        style={photoLayout.wrapperStyle}
+                      >
+                        <img
+                          src={photo.url}
+                          alt=""
+                          style={photoLayout.imageStyle}
+                          onLoad={(event) => rememberPhotoDimensions(dateKey, event)}
+                        />
+                      </div>
                     )}
                     <time dateTime={dateKey}>{day}</time>
                   </button>
@@ -592,26 +766,31 @@ function App() {
             {pendingPhoto ? (
               <div className="crop-section">
                 <p className="crop-title">Crop Photo</p>
-                <div
-                  className="crop-frame"
-                  style={{
-                    aspectRatio: currentPhotoRatioValue,
-                    width: `min(100%, ${cropFrameWidth}px)`,
-                  }}
-                  onPointerDown={startCropDrag}
-                  onPointerMove={moveCrop}
-                  onPointerUp={stopCropDrag}
-                  onPointerCancel={stopCropDrag}
-                >
-                  <img
-                    src={pendingPhoto.url}
-                    alt={`Crop preview for ${fullDateFormatter.format(selectedDate)}`}
-                    draggable="false"
-                    style={getCropImageStyle(
-                      pendingPhoto.crop,
-                      currentPhotoRatio,
-                    )}
-                  />
+                <div className="crop-editor">
+                  <div
+                    className="crop-frame"
+                    style={{
+                      aspectRatio: currentPhotoRatioValue,
+                      width: `min(100%, ${cropFrameWidth}px)`,
+                    }}
+                    onPointerDown={startCropDrag}
+                    onPointerMove={moveCrop}
+                    onPointerUp={stopCropDrag}
+                    onPointerCancel={stopCropDrag}
+                  >
+                    <div
+                      className="photo-transform"
+                      style={pendingPhotoLayout.wrapperStyle}
+                    >
+                      <img
+                        src={pendingPhoto.url}
+                        alt={`Crop preview for ${fullDateFormatter.format(selectedDate)}`}
+                        draggable="false"
+                        style={pendingPhotoLayout.imageStyle}
+                        onLoad={handlePendingImageLoad}
+                      />
+                    </div>
+                  </div>
                 </div>
                 <p className="crop-help">Drag the photo to choose the area to keep.</p>
 
@@ -627,7 +806,7 @@ function App() {
                   <input
                     id="photo-zoom"
                     type="range"
-                    min="1"
+                    min="0.5"
                     max="3"
                     step="0.05"
                     value={pendingPhoto.crop.zoom}
@@ -645,6 +824,16 @@ function App() {
                   </output>
                 </div>
 
+                <div className="rotate-controls">
+                  <span>Rotate</span>
+                  <button type="button" onClick={() => rotatePhoto(-90)}>
+                    ↺ Rotate Left
+                  </button>
+                  <button type="button" onClick={() => rotatePhoto(90)}>
+                    Rotate Right ↻
+                  </button>
+                </div>
+
                 <button className="reset-crop-button" type="button" onClick={resetCrop}>
                   Reset
                 </button>
@@ -658,11 +847,19 @@ function App() {
                     width: `min(100%, ${cropFrameWidth}px)`,
                   }}
                 >
-                  <img
-                    src={savedPhoto.url}
-                    alt={`Photo for ${fullDateFormatter.format(selectedDate)}`}
-                    style={getCropImageStyle(savedPhoto.crop, currentPhotoRatio)}
-                  />
+                  <div
+                    className="photo-transform"
+                    style={savedPhotoLayout.wrapperStyle}
+                  >
+                    <img
+                      src={savedPhoto.url}
+                      alt={`Photo for ${fullDateFormatter.format(selectedDate)}`}
+                      style={savedPhotoLayout.imageStyle}
+                      onLoad={(event) =>
+                        rememberPhotoDimensions(selectedDateKey, event)
+                      }
+                    />
+                  </div>
                 </div>
               </div>
             ) : null}
