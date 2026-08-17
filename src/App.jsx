@@ -18,16 +18,38 @@ const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
+const visibleMonthStorageKey = 'photo-calendar-visible-month'
 
 function getDateKey(year, month, day) {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+function getInitialVisibleMonth() {
+  const today = new Date()
+
+  try {
+    const savedMonth = JSON.parse(
+      localStorage.getItem(visibleMonthStorageKey),
+    )
+
+    if (
+      Number.isInteger(savedMonth?.year) &&
+      Number.isInteger(savedMonth?.month) &&
+      savedMonth.month >= 0 &&
+      savedMonth.month <= 11
+    ) {
+      return new Date(savedMonth.year, savedMonth.month, 1)
+    }
+  } catch (error) {
+    console.error('Could not read the saved calendar month:', error)
+  }
+
+  return new Date(today.getFullYear(), today.getMonth(), 1)
+}
+
 function App() {
   const today = new Date()
-  const [visibleMonth, setVisibleMonth] = useState(
-    () => new Date(today.getFullYear(), today.getMonth(), 1),
-  )
+  const [visibleMonth, setVisibleMonth] = useState(getInitialVisibleMonth)
   const [selectedDate, setSelectedDate] = useState(null)
   const [photosByDate, setPhotosByDate] = useState({})
   const [pendingPhoto, setPendingPhoto] = useState(null)
@@ -86,6 +108,18 @@ function App() {
 
   const year = visibleMonth.getFullYear()
   const month = visibleMonth.getMonth()
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        visibleMonthStorageKey,
+        JSON.stringify({ year, month }),
+      )
+    } catch (error) {
+      console.error('Could not save the current calendar month:', error)
+    }
+  }, [year, month])
+
   const firstWeekday = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const calendarDays = [
