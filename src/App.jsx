@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 const monthFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'long',
@@ -12,6 +12,11 @@ const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
 })
 
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
+
+function getDateKey(year, month, day) {
+  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
 
 function App() {
   const today = new Date()
@@ -19,6 +24,10 @@ function App() {
     () => new Date(today.getFullYear(), today.getMonth(), 1),
   )
   const [selectedDate, setSelectedDate] = useState(null)
+  const [photosByDate, setPhotosByDate] = useState({})
+  const [pendingPhoto, setPendingPhoto] = useState(null)
+  const [fileError, setFileError] = useState('')
+  const fileInputRef = useRef(null)
 
   const year = visibleMonth.getFullYear()
   const month = visibleMonth.getMonth()
@@ -45,10 +54,14 @@ function App() {
 
   function openDateModal(day) {
     setSelectedDate(new Date(year, month, day))
+    setPendingPhoto(null)
+    setFileError('')
   }
 
   function closeDateModal() {
     setSelectedDate(null)
+    setPendingPhoto(null)
+    setFileError('')
   }
 
   function closeOnOverlay(event) {
@@ -56,6 +69,74 @@ function App() {
       closeDateModal()
     }
   }
+
+  function choosePhoto() {
+    fileInputRef.current.value = ''
+    fileInputRef.current.click()
+  }
+
+  function handlePhotoSelection(event) {
+    const file = event.target.files[0]
+
+    if (!file) {
+      return
+    }
+
+    if (!allowedImageTypes.includes(file.type)) {
+      setFileError('Please choose a JPG, PNG, or WebP image.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      setPendingPhoto(reader.result)
+      setFileError('')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  function savePhoto() {
+    const dateKey = getDateKey(
+      selectedDate.getFullYear(),
+      selectedDate.getMonth(),
+      selectedDate.getDate(),
+    )
+
+    setPhotosByDate((currentPhotos) => ({
+      ...currentPhotos,
+      [dateKey]: pendingPhoto,
+    }))
+    closeDateModal()
+  }
+
+  function cancelPhotoSelection() {
+    setPendingPhoto(null)
+    setFileError('')
+  }
+
+  function deletePhoto() {
+    const dateKey = getDateKey(
+      selectedDate.getFullYear(),
+      selectedDate.getMonth(),
+      selectedDate.getDate(),
+    )
+
+    setPhotosByDate((currentPhotos) => {
+      const updatedPhotos = { ...currentPhotos }
+      delete updatedPhotos[dateKey]
+      return updatedPhotos
+    })
+    closeDateModal()
+  }
+
+  const selectedDateKey = selectedDate
+    ? getDateKey(
+        selectedDate.getFullYear(),
+        selectedDate.getMonth(),
+        selectedDate.getDate(),
+      )
+    : null
+  const savedPhoto = selectedDateKey ? photosByDate[selectedDateKey] : null
 
   return (
     <main className="calendar-page">
@@ -93,27 +174,31 @@ function App() {
         </div>
 
         <div className="days-grid">
-          {calendarDays.map((day, index) => (
-            <div
-              className={`day-cell${day === null ? ' empty' : ''}${
-                isToday(day) ? ' today' : ''
-              }`}
-              key={`${year}-${month}-${index}`}
-            >
-              {day !== null && (
-                <button
-                  className="date-button"
-                  type="button"
-                  onClick={() => openDateModal(day)}
-                  aria-label={fullDateFormatter.format(new Date(year, month, day))}
-                >
-                  <time dateTime={`${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`}>
-                    {day}
-                  </time>
-                </button>
-              )}
-            </div>
-          ))}
+          {calendarDays.map((day, index) => {
+            const dateKey = day ? getDateKey(year, month, day) : null
+            const photo = dateKey ? photosByDate[dateKey] : null
+
+            return (
+              <div
+                className={`day-cell${day === null ? ' empty' : ''}${
+                  isToday(day) ? ' today' : ''
+                }`}
+                key={`${year}-${month}-${index}`}
+              >
+                {day !== null && (
+                  <button
+                    className="date-button"
+                    type="button"
+                    onClick={() => openDateModal(day)}
+                    aria-label={fullDateFormatter.format(new Date(year, month, day))}
+                  >
+                    {photo && <img src={photo} alt="" />}
+                    <time dateTime={dateKey}>{day}</time>
+                  </button>
+                )}
+              </div>
+            )
+          })}
         </div>
       </section>
 
@@ -139,18 +224,69 @@ function App() {
               {fullDateFormatter.format(selectedDate)}
             </h2>
 
-            <div className="modal-actions">
-              <button className="add-photo-button" type="button">
-                Add Photo
-              </button>
-              <button
-                className="close-button"
-                type="button"
-                onClick={closeDateModal}
-              >
-                Close
-              </button>
-            </div>
+            <input
+              ref={fileInputRef}
+              className="photo-input"
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={handlePhotoSelection}
+            />
+
+            {(pendingPhoto || savedPhoto) && (
+              <div className="photo-preview">
+                <img
+                  src={pendingPhoto || savedPhoto}
+                  alt={`Photo for ${fullDateFormatter.format(selectedDate)}`}
+                />
+              </div>
+            )}
+
+            {fileError && <p className="file-error">{fileError}</p>}
+
+            {pendingPhoto ? (
+              <div className="modal-actions">
+                <button
+                  className="add-photo-button"
+                  type="button"
+                  onClick={savePhoto}
+                >
+                  Save Photo
+                </button>
+                <button
+                  className="close-button"
+                  type="button"
+                  onClick={cancelPhotoSelection}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="modal-actions">
+                <button
+                  className="add-photo-button"
+                  type="button"
+                  onClick={choosePhoto}
+                >
+                  {savedPhoto ? 'Replace Photo' : 'Add Photo'}
+                </button>
+                {savedPhoto && (
+                  <button
+                    className="delete-photo-button"
+                    type="button"
+                    onClick={deletePhoto}
+                  >
+                    Delete Photo
+                  </button>
+                )}
+                <button
+                  className="close-button"
+                  type="button"
+                  onClick={closeDateModal}
+                >
+                  Close
+                </button>
+              </div>
+            )}
           </section>
         </div>
       )}
