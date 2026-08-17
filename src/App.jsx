@@ -103,7 +103,7 @@ function getInitialMonthSettings() {
       ? savedSettings
       : {}
   } catch (error) {
-    console.error('Could not read the saved photo ratios:', error)
+    console.error('Could not read the saved calendar appearance:', error)
     return {}
   }
 }
@@ -350,7 +350,7 @@ function App() {
         JSON.stringify(monthSettings),
       )
     } catch (error) {
-      console.error('Could not save the photo ratios:', error)
+      console.error('Could not save the calendar appearance:', error)
     }
   }, [monthSettings])
 
@@ -417,7 +417,7 @@ function App() {
     return { ...calendar, days }
   }
 
-  async function downloadCalendar(calendar) {
+  async function downloadCalendar(calendar, fileName) {
     const calendarWithDimensions = await addMissingPhotoDimensions(calendar)
     setActiveExportCalendar(calendarWithDimensions)
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
@@ -461,7 +461,6 @@ function App() {
       context.drawImage(image, 0, 0, exportWidth, outputHeight)
 
       const mimeType = exportFormat === 'jpg' ? 'image/jpeg' : 'image/png'
-      const extension = exportFormat === 'jpg' ? 'jpg' : 'png'
       const imageBlob = await new Promise((resolve, reject) => {
         canvas.toBlob(
           (blob) => blob ? resolve(blob) : reject(new Error(`The browser could not create ${mimeType}.`)),
@@ -472,7 +471,7 @@ function App() {
       const downloadUrl = URL.createObjectURL(imageBlob)
       const link = document.createElement('a')
       link.href = downloadUrl
-      link.download = `photo-calendar-${getMonthKey(calendarWithDimensions.year, calendarWithDimensions.month)}.${extension}`
+      link.download = fileName
       link.click()
       URL.revokeObjectURL(downloadUrl)
     } finally {
@@ -502,6 +501,9 @@ function App() {
       const monthIndex = exportStartIndex + index
       const exportYear = Math.floor(monthIndex / 12)
       const exportMonth = monthIndex % 12
+      const monthString = String(exportMonth + 1).padStart(2, '0')
+      const extension = exportFormat === 'jpg' ? 'jpg' : 'png'
+      const fileName = `photo-calendar-${exportYear}-${monthString}.${extension}`
       const calendar = getCalendarExportData(
         exportYear,
         exportMonth,
@@ -512,7 +514,7 @@ function App() {
       setExportStatus(`Exporting ${index + 1} / ${exportMonthCount}...`)
 
       try {
-        await downloadCalendar(calendar)
+        await downloadCalendar(calendar, fileName)
       } catch (error) {
         console.error(`Could not export ${calendar.title}:`, error)
         setExportStatus('Failed to export this calendar.')
@@ -1197,7 +1199,7 @@ function App() {
         }}>
           <section className="date-modal export-modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
             <button className="modal-x-button" type="button" onClick={closeExportModal} aria-label="Close export dialog">×</button>
-            <p className="modal-label">PNG export</p>
+            <p className="modal-label">{exportFormat.toUpperCase()} export</p>
             <h2 id="export-modal-title">Export Calendars</h2>
 
             <div className="export-range">
