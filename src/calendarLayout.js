@@ -152,6 +152,85 @@ export function calculateEditorCalendarLayout({
   }
 }
 
+export function calculateMobileCalendarLayout({
+  calendarWidth,
+  pageAspectRatio,
+  weekCount,
+  cellGap = 0,
+  photoRatio = '1:1',
+}) {
+  const validPageAspectRatio = Number.isFinite(pageAspectRatio) && pageAspectRatio > 0
+    ? pageAspectRatio
+    : 3 / 2
+  const pagePadding = clamp(calendarWidth * 0.025, 6, 10)
+  const contentWidth = Math.max(0, calendarWidth - pagePadding * 2)
+  const gridWidth = contentWidth
+  const cellWidth = Math.max(0, (gridWidth - cellGap * 6) / 7)
+  const mobileCellHeightRatio = clamp(
+    2.1 / Math.sqrt(validPageAspectRatio),
+    1.5,
+    2.3,
+  )
+  const cellHeight = Math.max(80, cellWidth * mobileCellHeightRatio)
+  const gridHeight = cellHeight * weekCount + cellGap * (weekCount - 1)
+  const monthHeaderHeight = clamp(calendarWidth * 0.14, 46, 58)
+  const weekdayHeaderHeight = 32
+  const sectionGap = 7
+  const dateFontSize = clamp(cellWidth * 0.25, 12, 15)
+  const noteFontSize = clamp(cellWidth * 0.18, 9, 11)
+  const noteLineHeight = 1.3
+  const noteLineHeightPx = noteFontSize * noteLineHeight
+  const notePaddingY = 1.5
+  const contentPaddingX = clamp(cellWidth * 0.06, 2, 4)
+  const contentPaddingTop = 3
+  const contentPaddingBottom = 3
+  const contentGap = 3
+  const dateHeaderHeight = Math.max(24, dateFontSize * 1.7)
+  const calendarHeight = pagePadding * 2
+    + monthHeaderHeight
+    + weekdayHeaderHeight
+    + sectionGap * 2
+    + gridHeight
+  const { aspect: photoAspect, cellHeightBias } = getPhotoAspectInfo(photoRatio)
+
+  return {
+    calendarHeight,
+    cellPadding: contentPaddingX,
+    cellHeight,
+    cellHeightBias,
+    cellWidth,
+    circleBorderWidth: 1,
+    circleSize: clamp(Math.min(cellWidth, cellHeight) * 0.28, 18, 24),
+    contentGap,
+    contentHeight: calendarHeight - pagePadding * 2,
+    contentPaddingBottom,
+    contentPaddingTop,
+    contentPaddingX,
+    contentWidth,
+    dateFontSize,
+    dateHeaderHeight,
+    gridHeight,
+    gridWidth,
+    markerDotSize: Math.max(4, dateFontSize * 0.35),
+    markerGap: 2,
+    markerStarSize: Math.max(9, dateFontSize * 0.8),
+    monthHeaderHeight,
+    monthTitleFontSize: clamp(calendarWidth * 0.07, 22, 28),
+    noteFontSize,
+    noteLineHeight,
+    noteLineHeightPx,
+    notePaddingY,
+    pagePadding,
+    photoAspect,
+    photoMaxHeight: Math.max(1, cellHeight - dateHeaderHeight - contentPaddingTop - contentPaddingBottom),
+    photoMaxWidth: Math.max(1, cellWidth - contentPaddingX * 2),
+    sectionGap,
+    weekdayFontSize: 11,
+    weekdayHeaderHeight,
+    weekdayLetterSpacing: 0.3,
+  }
+}
+
 export function calculateCalendarLayout({
   paperWidth,
   paperHeight,

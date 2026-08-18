@@ -5,7 +5,7 @@ import {
   savePhotoRecord,
 } from './photoDatabase.js'
 import CalendarExportView from './CalendarExportView.jsx'
-import { calculateCalendarLayout, calculateCellContentLayout, calculateEditorCalendarLayout } from './calendarLayout.js'
+import { calculateCalendarLayout, calculateCellContentLayout, calculateEditorCalendarLayout, calculateMobileCalendarLayout } from './calendarLayout.js'
 import {
   getCellGap,
   getCornerRadius,
@@ -280,6 +280,7 @@ function App() {
   const [exportStatus, setExportStatus] = useState('')
   const [previewZoom, setPreviewZoom] = useState(getInitialPreviewZoom)
   const [isDesktopEditor, setIsDesktopEditor] = useState(false)
+  const [isMobileEditor, setIsMobileEditor] = useState(false)
   const fileInputRef = useRef(null)
   const exportViewRef = useRef(null)
   const calendarWorkspaceRef = useRef(null)
@@ -414,10 +415,18 @@ function App() {
 
   useEffect(() => {
     const desktopQuery = window.matchMedia('(min-width: 901px)')
-    const updateEditorMode = () => setIsDesktopEditor(desktopQuery.matches)
+    const mobileQuery = window.matchMedia('(max-width: 767px)')
+    const updateEditorMode = () => {
+      setIsDesktopEditor(desktopQuery.matches)
+      setIsMobileEditor(mobileQuery.matches)
+    }
     desktopQuery.addEventListener('change', updateEditorMode)
+    mobileQuery.addEventListener('change', updateEditorMode)
     updateEditorMode()
-    return () => desktopQuery.removeEventListener('change', updateEditorMode)
+    return () => {
+      desktopQuery.removeEventListener('change', updateEditorMode)
+      mobileQuery.removeEventListener('change', updateEditorMode)
+    }
   }, [])
 
   const firstWeekday = new Date(year, month, 1).getDay()
@@ -446,10 +455,20 @@ function App() {
         photoRatio: currentPhotoRatio,
       })
     : null
-  const calendarDisplaySize = editorLayout
-    ? { height: editorLayout.calendarHeight, width: calendarWorkspaceSize.width }
+  const mobileLayout = isMobileEditor && calendarWorkspaceSize.width
+    ? calculateMobileCalendarLayout({
+        calendarWidth: calendarWorkspaceSize.width,
+        pageAspectRatio: previewAspectRatio,
+        weekCount: calendarRows,
+        cellGap: getCellGap(currentAppearance.cellGap),
+        photoRatio: currentPhotoRatio,
+      })
+    : null
+  const naturalEditorLayout = editorLayout || mobileLayout
+  const calendarDisplaySize = naturalEditorLayout
+    ? { height: naturalEditorLayout.calendarHeight, width: calendarWorkspaceSize.width }
     : workspaceFittedCalendarSize
-  const previewLayout = editorLayout || (workspaceFittedCalendarSize
+  const previewLayout = naturalEditorLayout || (workspaceFittedCalendarSize
     ? calculateCalendarLayout({
         paperWidth: workspaceFittedCalendarSize.width,
         paperHeight: workspaceFittedCalendarSize.height,
@@ -459,7 +478,7 @@ function App() {
         noteLines: currentAppearance.noteLines,
       })
     : null)
-  const previewScale = previewZoom / 100
+  const previewScale = isMobileEditor ? 1 : previewZoom / 100
   const scaledPreviewWidth = (calendarDisplaySize?.width || 0) * previewScale
   const scaledPreviewHeight = (calendarDisplaySize?.height || 0) * previewScale
   const currentCellGap = getCellGap(currentAppearance.cellGap)
@@ -1094,7 +1113,7 @@ function App() {
         style={{
           height: `${scaledPreviewHeight}px`,
           width: `${scaledPreviewWidth}px`,
-          marginTop: isDesktopEditor
+          marginTop: isDesktopEditor || isMobileEditor
             ? '0px'
             : `${Math.max(0, (calendarWorkspaceSize.height - scaledPreviewHeight) / 2)}px`,
         }}
