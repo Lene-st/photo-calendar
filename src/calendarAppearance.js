@@ -8,7 +8,6 @@ export const photoRatios = {
 
 export const defaultMonthAppearance = {
   photoRatio: '1:1',
-  showNotes: true,
   noteLines: 2,
   backgroundColor: '#fffdf8',
   gridColor: '#d8d2c4',
@@ -16,66 +15,69 @@ export const defaultMonthAppearance = {
   headerTextColor: '#62695f',
   cornerStyle: 'slightly-rounded',
   cellGap: 'none',
-  paperSize: 'default',
+  pageRatio: 'default',
   orientation: 'landscape',
-  customWidth: 180,
-  customHeight: 120,
+  customRatioWidth: 5,
+  customRatioHeight: 7,
 }
 
-export const PAPER_PRESETS = {
-  a4: { width: 210, height: 297 },
-  a5: { width: 148, height: 210 },
-  a6: { width: 105, height: 148 },
+export const PAGE_RATIOS = {
+  default: 3 / 2,
+  '4:3': 4 / 3,
+  '3:2': 3 / 2,
+  '16:9': 16 / 9,
+  '1:1': 1,
 }
 
 export function getMonthAppearance(monthSettings, monthKey) {
   const saved = monthSettings[monthKey] || {}
-  const customWidth = Number(saved.customWidth)
-  const customHeight = Number(saved.customHeight)
+  const { paperSize, paperWidth, paperHeight, customWidth, customHeight, showNotes, ...currentSettings } = saved
+  void paperSize
+  void paperWidth
+  void paperHeight
+  void customWidth
+  void customHeight
+  void showNotes
+  const customRatioWidth = Number(currentSettings.customRatioWidth)
+  const customRatioHeight = Number(currentSettings.customRatioHeight)
   return {
     ...defaultMonthAppearance,
-    ...saved,
-    photoRatio: photoRatios[saved.photoRatio] ? saved.photoRatio : '1:1',
-    noteLines: [1, 2, 3].includes(Number(saved.noteLines))
-      ? Number(saved.noteLines)
+    ...currentSettings,
+    photoRatio: photoRatios[currentSettings.photoRatio] ? currentSettings.photoRatio : '1:1',
+    noteLines: [1, 2, 3].includes(Number(currentSettings.noteLines))
+      ? Number(currentSettings.noteLines)
       : defaultMonthAppearance.noteLines,
-    paperSize: ['default', 'a4', 'a5', 'a6', 'custom'].includes(saved.paperSize)
-      ? saved.paperSize
-      : defaultMonthAppearance.paperSize,
-    orientation: ['landscape', 'portrait'].includes(saved.orientation)
-      ? saved.orientation
+    pageRatio: Object.hasOwn(PAGE_RATIOS, currentSettings.pageRatio) || currentSettings.pageRatio === 'custom'
+      ? currentSettings.pageRatio
+      : defaultMonthAppearance.pageRatio,
+    orientation: ['landscape', 'portrait'].includes(currentSettings.orientation)
+      ? currentSettings.orientation
       : defaultMonthAppearance.orientation,
-    customWidth: Number.isFinite(customWidth)
-      ? customWidth
-      : defaultMonthAppearance.customWidth,
-    customHeight: Number.isFinite(customHeight)
-      ? customHeight
-      : defaultMonthAppearance.customHeight,
+    customRatioWidth: Number.isFinite(customRatioWidth)
+      ? customRatioWidth
+      : defaultMonthAppearance.customRatioWidth,
+    customRatioHeight: Number.isFinite(customRatioHeight)
+      ? customRatioHeight
+      : defaultMonthAppearance.customRatioHeight,
   }
 }
 
-export function getPaperLayout(appearance) {
-  if (appearance.paperSize === 'default') {
-    return { aspectRatio: null, height: null, width: null }
-  }
-
-  const baseSize = appearance.paperSize === 'custom'
-    ? { width: Number(appearance.customWidth), height: Number(appearance.customHeight) }
-    : PAPER_PRESETS[appearance.paperSize]
-
-  if (!baseSize || baseSize.width <= 0 || baseSize.height <= 0) {
-    return { aspectRatio: null, height: null, width: null }
-  }
+export function getPageLayout(appearance) {
+  const customWidth = Number(appearance.customRatioWidth)
+  const customHeight = Number(appearance.customRatioHeight)
+  const baseRatio = appearance.pageRatio === 'custom'
+    ? customWidth / customHeight
+    : PAGE_RATIOS[appearance.pageRatio] || PAGE_RATIOS.default
+  const validRatio = Number.isFinite(baseRatio) && baseRatio > 0
+    ? baseRatio
+    : PAGE_RATIOS.default
 
   const isLandscape = appearance.orientation === 'landscape'
-  const width = isLandscape
-    ? Math.max(baseSize.width, baseSize.height)
-    : Math.min(baseSize.width, baseSize.height)
-  const height = isLandscape
-    ? Math.min(baseSize.width, baseSize.height)
-    : Math.max(baseSize.width, baseSize.height)
+  const aspectRatio = isLandscape
+    ? Math.max(validRatio, 1 / validRatio)
+    : Math.min(validRatio, 1 / validRatio)
 
-  return { aspectRatio: width / height, height, width }
+  return { aspectRatio }
 }
 
 export function getFittedCalendarSize(availableWidth, availableHeight, aspectRatio) {
@@ -96,16 +98,11 @@ export function getFittedCalendarSize(availableWidth, availableHeight, aspectRat
   }
 }
 
-export function getExportDimensions(appearance, defaultWidth, defaultHeight, dpi = 300) {
-  const paper = getPaperLayout(appearance)
-  if (!paper.aspectRatio) {
-    return { height: defaultHeight, width: defaultWidth }
-  }
-
-  return {
-    height: Math.round((paper.height / 25.4) * dpi),
-    width: Math.round((paper.width / 25.4) * dpi),
-  }
+export function getRatioExportDimensions(appearance, longEdge = 2400) {
+  const { aspectRatio } = getPageLayout(appearance)
+  return aspectRatio >= 1
+    ? { height: Math.round(longEdge / aspectRatio), width: longEdge }
+    : { height: longEdge, width: Math.round(longEdge * aspectRatio) }
 }
 
 export function getPhotoFrameSize(ratioName, maxWidth, maxHeight) {

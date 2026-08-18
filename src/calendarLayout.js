@@ -68,13 +68,96 @@ export function calculateCellContentLayout(layout, { hasNote = false, noteLineCo
   }
 }
 
+export function calculateEditorCalendarLayout({
+  calendarWidth,
+  pageAspectRatio,
+  weekCount,
+  cellGap = 0,
+  photoRatio = '1:1',
+}) {
+  const validPageAspectRatio = Number.isFinite(pageAspectRatio) && pageAspectRatio > 0
+    ? pageAspectRatio
+    : 3 / 2
+  const calendarHeight = calendarWidth / validPageAspectRatio
+  const shortSide = Math.min(calendarWidth, calendarHeight)
+  const pagePadding = clamp(shortSide * 0.035, 16, 36)
+  const contentWidth = Math.max(0, calendarWidth - pagePadding * 2)
+  const contentHeight = Math.max(0, calendarHeight - pagePadding * 2)
+  const monthHeaderHeight = clamp(contentHeight * 0.12, 54, 108)
+  const weekdayHeaderHeight = clamp(contentHeight * 0.065, 34, 64)
+  const sectionGap = clamp(contentHeight * 0.012, 7, 18)
+  const gridWidth = contentWidth
+  const gridHeight = Math.max(
+    0,
+    contentHeight - monthHeaderHeight - weekdayHeaderHeight - sectionGap * 2,
+  )
+  const cellWidth = Math.max(0, (gridWidth - cellGap * 6) / 7)
+  const cellHeight = Math.max(
+    0,
+    (gridHeight - cellGap * (weekCount - 1)) / weekCount,
+  )
+  const { aspect: photoAspect, cellHeightBias } = getPhotoAspectInfo(photoRatio)
+  const typography = calculateTypographyScale({
+    cellWidth,
+    cellHeight,
+    monthHeaderHeight,
+    weekdayHeaderHeight,
+  })
+  const dateFontSize = Math.max(14, typography.dateFontSize)
+  const noteFontSize = Math.max(12, typography.noteFontSize)
+  const noteLineHeight = 1.4
+  const noteLineHeightPx = noteFontSize * noteLineHeight
+  const notePaddingY = Math.max(2, noteFontSize * 0.18)
+  const contentPaddingX = Math.max(8, cellWidth * 0.06)
+  const contentPaddingTop = Math.max(6, cellHeight * 0.045)
+  const contentPaddingBottom = Math.max(6, cellHeight * 0.035)
+  const contentGap = Math.max(7, cellHeight * 0.04)
+  const dateHeaderHeight = Math.max(cellHeight * 0.16, dateFontSize * 1.9)
+
+  return {
+    calendarHeight,
+    cellPadding: contentPaddingX,
+    cellHeight,
+    cellHeightBias,
+    cellWidth,
+    circleBorderWidth: clamp(dateFontSize * 0.09, 1, 2.5),
+    circleSize: clamp(Math.min(cellWidth, cellHeight) * 0.22, dateFontSize * 1.45, dateFontSize * 1.9),
+    contentGap,
+    contentHeight,
+    contentPaddingBottom,
+    contentPaddingTop,
+    contentPaddingX,
+    contentWidth,
+    dateFontSize,
+    dateHeaderHeight,
+    gridHeight,
+    gridWidth,
+    markerDotSize: dateFontSize * 0.35,
+    markerGap: Math.max(2, dateFontSize * 0.3),
+    markerStarSize: dateFontSize * 0.8,
+    monthHeaderHeight,
+    monthTitleFontSize: Math.max(32, typography.monthTitleFontSize),
+    noteFontSize,
+    noteLineHeight,
+    noteLineHeightPx,
+    notePaddingY,
+    pagePadding,
+    photoAspect,
+    photoMaxHeight: Math.max(1, cellHeight - dateHeaderHeight - contentPaddingTop - contentPaddingBottom),
+    photoMaxWidth: Math.max(1, cellWidth - contentPaddingX * 2),
+    sectionGap,
+    weekdayFontSize: Math.max(14, typography.weekdayFontSize),
+    weekdayHeaderHeight,
+    weekdayLetterSpacing: clamp(cellWidth * 0.012, 0.5, 2.2),
+  }
+}
+
 export function calculateCalendarLayout({
   paperWidth,
   paperHeight,
   weekCount,
   cellGap = 0,
   photoRatio = '1:1',
-  showNotes = true,
   noteLines = 2,
 }) {
   const shortSide = Math.min(paperWidth, paperHeight)
@@ -91,7 +174,7 @@ export function calculateCalendarLayout({
   )
   const { aspect: photoAspect, cellHeightBias: baseCellHeightBias } = getPhotoAspectInfo(photoRatio)
   const cellHeightBias = clamp(
-    baseCellHeightBias + (showNotes ? clamp(Number(noteLines) || 1, 1, 3) * 0.015 : 0),
+    baseCellHeightBias + clamp(Number(noteLines) || 1, 1, 3) * 0.015,
     0.78,
     1,
   )

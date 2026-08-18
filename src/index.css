@@ -21,7 +21,7 @@ body {
 .calendar-page {
   box-sizing: border-box;
   min-height: 100vh;
-  padding: 48px 24px;
+  padding: 24px;
 }
 
 .calendar-toolbar {
@@ -98,31 +98,32 @@ body {
 
 .workspace-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1040px) 286px;
+  grid-template-columns: minmax(0, 1fr) 286px;
   align-items: start;
   justify-content: center;
   gap: 24px;
   width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
 }
 
 .calendar-workspace {
   display: block;
   min-width: 0;
-  height: calc(100vh - 180px);
-  min-height: 420px;
-  overflow: auto;
+  min-height: 0;
+  overflow: visible;
   box-sizing: border-box;
-  padding: 24px;
+  padding: 20px;
 }
 
-.paper-preview-scale-shell {
+.editor-calendar-shell {
   position: relative;
   flex: none;
   margin-right: auto;
   margin-left: auto;
 }
 
-.paper-preview-scale-shell > .paper-layout {
+.editor-calendar-shell > .editor-calendar {
   position: absolute;
   top: 0;
   left: 0;
@@ -192,7 +193,7 @@ body {
   outline-offset: 2px;
 }
 
-.calendar.paper-layout {
+.calendar.editor-calendar {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
@@ -200,18 +201,18 @@ body {
   padding: 0;
 }
 
-.calendar.paper-layout .paper-month-header,
-.calendar.paper-layout .weekday-row {
+.calendar.editor-calendar .paper-month-header,
+.calendar.editor-calendar .weekday-row {
   flex: 0 0 auto;
 }
 
-.calendar.paper-layout .days-grid {
+.calendar.editor-calendar .days-grid {
   flex: 0 0 auto;
   min-height: 0;
   grid-template-rows: repeat(var(--calendar-rows), minmax(0, 1fr));
 }
 
-.calendar.paper-layout .day-cell {
+.calendar.editor-calendar .day-cell {
   height: auto;
   min-height: 0;
 }
@@ -258,26 +259,32 @@ body {
   font-weight: 500;
 }
 
+.setting-help {
+  color: #74796f;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
 .sidebar-month {
   margin: 6px 0 0;
   color: #858b7f;
   font-size: 0.82rem;
 }
 
-.custom-size-fields {
+.custom-ratio-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.custom-size-fields label {
+.custom-ratio-fields label {
   display: grid;
   gap: 6px;
   color: #566052;
   font-size: 0.78rem;
 }
 
-.custom-size-fields input {
+.custom-ratio-fields input {
   box-sizing: border-box;
   width: 100%;
   padding: 8px;
@@ -691,15 +698,15 @@ body {
   font-size: 0.88rem;
 }
 
-.export-paper-note,
-.export-paper-help {
+.export-page-note,
+.export-page-help {
   margin: 14px 0 0;
   color: #63705e;
   font-size: 0.84rem;
   line-height: 1.55;
 }
 
-.export-paper-help {
+.export-page-help {
   margin-top: 6px;
   color: #858b7f;
 }
@@ -829,6 +836,11 @@ body {
 .note-field textarea:focus-visible {
   outline: 3px solid rgba(106, 125, 98, 0.3);
   outline-offset: 2px;
+}
+
+.note-calendar-toggle {
+  margin-top: 12px;
+  color: #566052;
 }
 
 .day-view-note {
@@ -1134,6 +1146,7 @@ body {
   .calendar-workspace {
     height: min(75svh, 720px);
     min-height: 420px;
+    overflow: auto;
   }
 
   .calendar {

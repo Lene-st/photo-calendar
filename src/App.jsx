@@ -5,16 +5,15 @@ import {
   savePhotoRecord,
 } from './photoDatabase.js'
 import CalendarExportView from './CalendarExportView.jsx'
-import { exportViewWidth, getExportViewHeight } from './calendarExportLayout.js'
-import { calculateCalendarLayout, calculateCellContentLayout } from './calendarLayout.js'
+import { calculateCalendarLayout, calculateCellContentLayout, calculateEditorCalendarLayout } from './calendarLayout.js'
 import {
   getCellGap,
   getCornerRadius,
-  getExportDimensions,
+  getRatioExportDimensions,
   getFittedCalendarSize,
   getMarkerSymbol,
   getMonthAppearance,
-  getPaperLayout,
+  getPageLayout,
   getPhotoFrameSize,
   photoRatios,
 } from './calendarAppearance.js'
@@ -41,7 +40,7 @@ const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
 const visibleMonthStorageKey = 'photo-calendar-visible-month'
 const monthSettingsStorageKey = 'calendarMonthSettings'
 const previewZoomStorageKey = 'photo-calendar-preview-zoom'
-const defaultExportWidth = 1920
+const exportLongEdge = 2400
 
 function getInitialPreviewZoom() {
   try {
@@ -95,6 +94,7 @@ function getCalendarExportData(year, month, photosByDate, monthSettings, today) 
         day,
         dateKey,
         note: entry?.note || '',
+        showNoteInCalendar: entry?.showNoteInCalendar === true,
         highlight: Boolean(entry?.highlight),
         highlightColor: entry?.highlightColor || '#f5edc9',
         marker: entry?.marker || 'none',
@@ -116,9 +116,13 @@ function getInitialMonthSettings() {
     const savedSettings = JSON.parse(
       localStorage.getItem(monthSettingsStorageKey),
     )
-    return savedSettings && typeof savedSettings === 'object'
-      ? savedSettings
-      : {}
+    if (!savedSettings || typeof savedSettings !== 'object') return {}
+    return Object.fromEntries(
+      Object.keys(savedSettings).map((savedMonthKey) => [
+        savedMonthKey,
+        getMonthAppearance(savedSettings, savedMonthKey),
+      ]),
+    )
   } catch (error) {
     console.error('Could not read the saved calendar appearance:', error)
     return {}
@@ -260,6 +264,7 @@ function App() {
   const [pendingPhoto, setPendingPhoto] = useState(null)
   const [isEditingDay, setIsEditingDay] = useState(false)
   const [draftNote, setDraftNote] = useState('')
+  const [draftShowNoteInCalendar, setDraftShowNoteInCalendar] = useState(false)
   const [isPhotoRemoved, setIsPhotoRemoved] = useState(false)
   const [draftHighlight, setDraftHighlight] = useState(false)
   const [draftHighlightColor, setDraftHighlightColor] = useState('#f5edc9')
@@ -274,6 +279,7 @@ function App() {
   const [exportFormat, setExportFormat] = useState('png')
   const [exportStatus, setExportStatus] = useState('')
   const [previewZoom, setPreviewZoom] = useState(getInitialPreviewZoom)
+  const [isDesktopEditor, setIsDesktopEditor] = useState(false)
   const fileInputRef = useRef(null)
   const exportViewRef = useRef(null)
   const calendarWorkspaceRef = useRef(null)
@@ -306,7 +312,7 @@ function App() {
         }
 
         const restoredPhotos = {}
-        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop, imageWidth, imageHeight, note = '', highlight = false, highlightColor = '#f5edc9', marker = 'none', markerColor = '#b85c55' }) => {
+        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop, imageWidth, imageHeight, note = '', showNoteInCalendar = false, highlight = false, highlightColor = '#f5edc9', marker = 'none', markerColor = '#b85c55' }) => {
           restoredPhotos[dateKey] = {
             crop,
             imageBlob,
@@ -314,6 +320,7 @@ function App() {
             imageType: imageType || imageBlob?.type,
             imageWidth,
             note,
+            showNoteInCalendar: showNoteInCalendar === true,
             highlight,
             highlightColor,
             marker,
@@ -366,11 +373,11 @@ function App() {
   const month = visibleMonth.getMonth()
   const monthKey = getMonthKey(year, month)
   const currentAppearance = getMonthAppearance(monthSettings, monthKey)
-  const currentPaperLayout = getPaperLayout(currentAppearance)
+  const currentPageLayout = getPageLayout(currentAppearance)
   const currentPhotoRatio = currentAppearance.photoRatio
   const currentPhotoRatioValue = photoRatios[currentPhotoRatio]
-  const customSizeInvalid = currentAppearance.paperSize === 'custom' && (
-    currentAppearance.customWidth <= 0 || currentAppearance.customHeight <= 0
+  const customRatioInvalid = currentAppearance.pageRatio === 'custom' && (
+    currentAppearance.customRatioWidth <= 0 || currentAppearance.customRatioHeight <= 0
   )
   const cropFrameWidth =
     currentPhotoRatioValue < 1 ? currentPhotoRatioValue * 320 : 360
@@ -405,6 +412,14 @@ function App() {
     }
   }, [previewZoom])
 
+  useEffect(() => {
+    const desktopQuery = window.matchMedia('(min-width: 901px)')
+    const updateEditorMode = () => setIsDesktopEditor(desktopQuery.matches)
+    desktopQuery.addEventListener('change', updateEditorMode)
+    updateEditorMode()
+    return () => desktopQuery.removeEventListener('change', updateEditorMode)
+  }, [])
+
   const firstWeekday = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
   const calendarDaysWithLeadingBlanks = [
@@ -416,28 +431,37 @@ function App() {
     ...calendarDaysWithLeadingBlanks,
     ...Array(calendarRows * 7 - calendarDaysWithLeadingBlanks.length).fill(null),
   ]
-  const previewAspectRatio = currentPaperLayout.aspectRatio || (
-    exportViewWidth / getExportViewHeight(calendarRows)
-  )
-  const fittedCalendarSize = getFittedCalendarSize(
+  const previewAspectRatio = currentPageLayout.aspectRatio
+  const workspaceFittedCalendarSize = getFittedCalendarSize(
     calendarWorkspaceSize.width,
     calendarWorkspaceSize.height,
     previewAspectRatio,
   )
-  const previewLayout = fittedCalendarSize
-    ? calculateCalendarLayout({
-        paperWidth: fittedCalendarSize.width,
-        paperHeight: fittedCalendarSize.height,
+  const editorLayout = isDesktopEditor && calendarWorkspaceSize.width
+    ? calculateEditorCalendarLayout({
+        calendarWidth: calendarWorkspaceSize.width,
+        pageAspectRatio: previewAspectRatio,
         weekCount: calendarRows,
         cellGap: getCellGap(currentAppearance.cellGap),
         photoRatio: currentPhotoRatio,
-        showNotes: currentAppearance.showNotes,
-        noteLines: currentAppearance.noteLines,
       })
     : null
+  const calendarDisplaySize = editorLayout
+    ? { height: editorLayout.calendarHeight, width: calendarWorkspaceSize.width }
+    : workspaceFittedCalendarSize
+  const previewLayout = editorLayout || (workspaceFittedCalendarSize
+    ? calculateCalendarLayout({
+        paperWidth: workspaceFittedCalendarSize.width,
+        paperHeight: workspaceFittedCalendarSize.height,
+        weekCount: calendarRows,
+        cellGap: getCellGap(currentAppearance.cellGap),
+        photoRatio: currentPhotoRatio,
+        noteLines: currentAppearance.noteLines,
+      })
+    : null)
   const previewScale = previewZoom / 100
-  const scaledPreviewWidth = (fittedCalendarSize?.width || 0) * previewScale
-  const scaledPreviewHeight = (fittedCalendarSize?.height || 0) * previewScale
+  const scaledPreviewWidth = (calendarDisplaySize?.width || 0) * previewScale
+  const scaledPreviewHeight = (calendarDisplaySize?.height || 0) * previewScale
   const currentCellGap = getCellGap(currentAppearance.cellGap)
   const currentCornerRadius = getCornerRadius(currentAppearance.cornerStyle)
   const exportStartIndex = exportFrom
@@ -503,16 +527,9 @@ function App() {
       throw new Error('The calendar export view was not rendered.')
     }
 
-    const defaultOutputHeight = Math.round(
-      (getExportViewHeight(
-        calendarWithDimensions.rows,
-        getPaperLayout(calendarWithDimensions.appearance).aspectRatio,
-      ) / exportViewWidth) * defaultExportWidth,
-    )
-    const { width: outputWidth, height: outputHeight } = getExportDimensions(
+    const { width: outputWidth, height: outputHeight } = getRatioExportDimensions(
       calendarWithDimensions.appearance,
-      defaultExportWidth,
-      defaultOutputHeight,
+      exportLongEdge,
     )
     const svg = exportViewRef.current.cloneNode(true)
     svg.setAttribute('width', outputWidth)
@@ -732,6 +749,7 @@ function App() {
     setSelectedDate(date)
     setPendingPhoto(null)
     setDraftNote(photosByDate[dateKey]?.note || '')
+    setDraftShowNoteInCalendar(photosByDate[dateKey]?.showNoteInCalendar === true)
     setDraftHighlight(Boolean(photosByDate[dateKey]?.highlight))
     setDraftHighlightColor(photosByDate[dateKey]?.highlightColor || '#f5edc9')
     setDraftMarker(photosByDate[dateKey]?.marker || 'none')
@@ -754,6 +772,7 @@ function App() {
 
   function startEditingDay() {
     setDraftNote(selectedEntry?.note || '')
+    setDraftShowNoteInCalendar(selectedEntry?.showNoteInCalendar === true)
     setDraftHighlight(Boolean(selectedEntry?.highlight))
     setDraftHighlightColor(selectedEntry?.highlightColor || '#f5edc9')
     setDraftMarker(selectedEntry?.marker || 'none')
@@ -875,6 +894,7 @@ function App() {
         : null
     )
     const note = draftNote
+    const showNoteInCalendar = Boolean(note.trim() && draftShowNoteInCalendar)
 
     try {
       const hasDayDecoration = draftHighlight || draftMarker !== 'none'
@@ -884,6 +904,7 @@ function App() {
         await savePhotoRecord({
           dateKey,
           note,
+          showNoteInCalendar,
           highlight: draftHighlight,
           highlightColor: draftHighlightColor,
           marker: draftMarker,
@@ -922,6 +943,7 @@ function App() {
           ...currentPhotos,
           [dateKey]: {
             note,
+            showNoteInCalendar,
             highlight: draftHighlight,
             highlightColor: draftHighlightColor,
             marker: draftMarker,
@@ -953,6 +975,7 @@ function App() {
     }
     setPendingPhoto(null)
     setDraftNote(selectedEntry?.note || '')
+    setDraftShowNoteInCalendar(selectedEntry?.showNoteInCalendar === true)
     setDraftHighlight(Boolean(selectedEntry?.highlight))
     setDraftHighlightColor(selectedEntry?.highlightColor || '#f5edc9')
     setDraftMarker(selectedEntry?.marker || 'none')
@@ -1056,26 +1079,28 @@ function App() {
         </button>
         <button className="export-button toolbar-export-button" type="button" onClick={openExportModal}>导出月历</button>
         <div className="preview-zoom-controls" aria-label="预览缩放">
-          <span>预览</span>
+          <span>编辑缩放</span>
           <button type="button" onClick={() => setPreviewZoom((zoom) => Math.max(50, zoom - 25))} aria-label="缩小预览">−</button>
           <output aria-live="polite">{previewZoom}%</output>
           <button type="button" onClick={() => setPreviewZoom((zoom) => Math.min(200, zoom + 25))} aria-label="放大预览">＋</button>
-          <button className="fit-preview-button" type="button" onClick={() => setPreviewZoom(100)}>适应窗口</button>
+          <button className="fit-preview-button" type="button" onClick={() => setPreviewZoom(100)}>恢复 100%</button>
         </div>
       </nav>
 
       <div className="workspace-layout">
       <div className="calendar-workspace" ref={calendarWorkspaceRef}>
       <div
-        className="paper-preview-scale-shell"
+        className="editor-calendar-shell"
         style={{
           height: `${scaledPreviewHeight}px`,
           width: `${scaledPreviewWidth}px`,
-          marginTop: `${Math.max(0, (calendarWorkspaceSize.height - scaledPreviewHeight) / 2)}px`,
+          marginTop: isDesktopEditor
+            ? '0px'
+            : `${Math.max(0, (calendarWorkspaceSize.height - scaledPreviewHeight) / 2)}px`,
         }}
       >
       <section
-        className="calendar paper-layout"
+        className="calendar editor-calendar"
         aria-label={monthFormatter.format(visibleMonth)}
         style={{
           '--calendar-background': currentAppearance.backgroundColor,
@@ -1083,9 +1108,9 @@ function App() {
           '--calendar-date-color': currentAppearance.dateTextColor,
           '--calendar-header-color': currentAppearance.headerTextColor,
           aspectRatio: previewAspectRatio,
-          ...(fittedCalendarSize && {
-            height: `${fittedCalendarSize.height}px`,
-            width: `${fittedCalendarSize.width}px`,
+          ...(calendarDisplaySize && {
+            height: `${calendarDisplaySize.height}px`,
+            width: `${calendarDisplaySize.width}px`,
           }),
           transform: `scale(${previewScale})`,
           transformOrigin: 'top left',
@@ -1156,7 +1181,7 @@ function App() {
             const photoLayout = photo
               ? getPhotoLayout(photo, currentPhotoRatio)
               : null
-            const hasVisibleNote = Boolean(currentAppearance.showNotes && entry?.note)
+            const hasVisibleNote = Boolean(entry?.note && entry.showNoteInCalendar === true)
             const cellContentLayout = previewLayout
               ? calculateCellContentLayout(previewLayout, {
                   hasNote: hasVisibleNote,
@@ -1231,7 +1256,7 @@ function App() {
                           </div>
                         </div>
                       )}
-                      {currentAppearance.showNotes && entry?.note && (
+                      {hasVisibleNote && (
                         <div
                           className="day-note-area"
                           style={{ height: `${cellContentLayout?.noteAreaHeight || 0}px` }}
@@ -1241,7 +1266,7 @@ function App() {
                           </p>
                         </div>
                       )}
-                      {!photo && !(currentAppearance.showNotes && entry?.note) && <span className="day-empty-mark" aria-hidden="true">·</span>}
+                      {!photo && !hasVisibleNote && <span className="day-empty-mark" aria-hidden="true">·</span>}
                     </div>
                   </button>
                 )}
@@ -1258,14 +1283,16 @@ function App() {
         <p className="sidebar-month">{monthFormatter.format(visibleMonth)}</p>
         <div className="customize-fields">
               <label className="customize-select-field">
-                <span>纸张尺寸</span>
-                <select value={currentAppearance.paperSize} onChange={(event) => changeMonthAppearance('paperSize', event.target.value)}>
+                <span>页面比例</span>
+                <select value={currentAppearance.pageRatio} onChange={(event) => changeMonthAppearance('pageRatio', event.target.value)}>
                   <option value="default">默认</option>
-                  <option value="a4">A4</option>
-                  <option value="a5">A5</option>
-                  <option value="a6">A6</option>
+                  <option value="4:3">4:3</option>
+                  <option value="3:2">3:2</option>
+                  <option value="16:9">16:9</option>
+                  <option value="1:1">1:1</option>
                   <option value="custom">自定义</option>
                 </select>
+                <small className="setting-help">页面比例会同时影响当前月历布局和导出图片。</small>
               </label>
               <label className="customize-select-field">
                 <span>方向</span>
@@ -1274,11 +1301,11 @@ function App() {
                   <option value="portrait">纵向</option>
                 </select>
               </label>
-              {currentAppearance.paperSize === 'custom' && (
-                <div className="custom-size-fields">
-                  <label><span>宽度（mm）</span><input type="number" min="1" value={currentAppearance.customWidth} onChange={(event) => changeMonthAppearance('customWidth', Number(event.target.value))} /></label>
-                  <label><span>高度（mm）</span><input type="number" min="1" value={currentAppearance.customHeight} onChange={(event) => changeMonthAppearance('customHeight', Number(event.target.value))} /></label>
-                  {customSizeInvalid && <p className="settings-error">请输入有效的宽度和高度。</p>}
+              {currentAppearance.pageRatio === 'custom' && (
+                <div className="custom-ratio-fields">
+                  <label><span>宽度比例</span><input type="number" min="0.1" step="0.1" value={currentAppearance.customRatioWidth} onChange={(event) => changeMonthAppearance('customRatioWidth', Number(event.target.value))} /></label>
+                  <label><span>高度比例</span><input type="number" min="0.1" step="0.1" value={currentAppearance.customRatioHeight} onChange={(event) => changeMonthAppearance('customRatioHeight', Number(event.target.value))} /></label>
+                  {customRatioInvalid && <p className="settings-error">请输入有效的页面比例。</p>}
                 </div>
               )}
 
@@ -1302,21 +1329,14 @@ function App() {
                 </label>
               ))}
 
-              <label className="toggle-field">
-                <span>月历显示文字</span>
-                <input type="checkbox" checked={currentAppearance.showNotes} onChange={(event) => changeMonthAppearance('showNotes', event.target.checked)} />
+              <label className="customize-select-field">
+                <span>文字显示行数</span>
+                <select value={currentAppearance.noteLines} onChange={(event) => changeMonthAppearance('noteLines', Number(event.target.value))}>
+                  <option value="1">1</option>
+                  <option value="2">2</option>
+                  <option value="3">3</option>
+                </select>
               </label>
-
-              {currentAppearance.showNotes && (
-                <label className="customize-select-field">
-                  <span>文字显示行数</span>
-                  <select value={currentAppearance.noteLines} onChange={(event) => changeMonthAppearance('noteLines', Number(event.target.value))}>
-                    <option value="1">1</option>
-                    <option value="2">2</option>
-                    <option value="3">3</option>
-                  </select>
-                </label>
-              )}
 
               <label className="customize-select-field">
                 <span>圆角</span>
@@ -1400,8 +1420,8 @@ function App() {
                 <option value="jpg">JPG</option>
               </select>
             </label>
-            <p className="export-paper-note">纸张尺寸：跟随月份设置<br />方向：跟随月份设置</p>
-            <p className="export-paper-help">导出将使用各月份设置的纸张尺寸和方向。</p>
+            <p className="export-page-note">页面比例：跟随月份设置<br />方向：跟随月份设置</p>
+            <p className="export-page-help">导出使用固定高清长边 2400px，并保持各月份的页面比例。</p>
 
             {exportValidationMessage ? (
               <p className="export-message error">{exportValidationMessage}</p>
@@ -1565,6 +1585,15 @@ function App() {
                     onChange={(event) => setDraftNote(event.target.value)}
                     rows="5"
                     placeholder="记录这一天……"
+                  />
+                </label>
+
+                <label className="toggle-field note-calendar-toggle">
+                  <span>在月历格中显示文字</span>
+                  <input
+                    type="checkbox"
+                    checked={draftShowNoteInCalendar}
+                    onChange={(event) => setDraftShowNoteInCalendar(event.target.checked)}
                   />
                 </label>
 

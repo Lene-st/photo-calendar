@@ -6,7 +6,7 @@ import {
   getCellGap,
   getCornerRadius,
   getMarkerSymbol,
-  getPaperLayout,
+  getPageLayout,
   getPhotoFrameSize,
 } from './calendarAppearance.js'
 import { calculateCalendarLayout, calculateCellContentLayout } from './calendarLayout.js'
@@ -60,8 +60,8 @@ function getNoteLines(note, maxLines, maxCharacters) {
 
 export default function CalendarExportView({ calendar, svgRef }) {
   const appearance = calendar.appearance
-  const paperLayout = getPaperLayout(appearance)
-  const height = getExportViewHeight(calendar.rows, paperLayout.aspectRatio)
+  const pageLayout = getPageLayout(appearance)
+  const height = getExportViewHeight(calendar.rows, pageLayout.aspectRatio)
   const cellGap = getCellGap(appearance.cellGap, 1.5)
   const layout = calculateCalendarLayout({
     paperWidth: exportViewWidth,
@@ -69,7 +69,6 @@ export default function CalendarExportView({ calendar, svgRef }) {
     weekCount: calendar.rows,
     cellGap,
     photoRatio: calendar.photoRatioName,
-    showNotes: appearance.showNotes,
     noteLines: appearance.noteLines,
   })
   const {
@@ -149,7 +148,7 @@ export default function CalendarExportView({ calendar, svgRef }) {
         const noteFontSize = layout.noteFontSize
         const noteLineHeight = layout.noteLineHeightPx
         const noteCharacters = Math.max(6, Math.floor((cellWidth - padding * 2) / (noteFontSize * 0.58)))
-        const noteLines = entry && appearance.showNotes
+        const noteLines = entry?.showNoteInCalendar
           ? getNoteLines(entry.note, appearance.noteLines, noteCharacters)
           : []
         const cellContentLayout = calculateCellContentLayout(layout, {
