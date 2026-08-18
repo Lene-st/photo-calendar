@@ -163,6 +163,8 @@ function getCropForRatio(crop, ratio) {
   const rotation = normalizeRotation(crop.rotation)
   return {
     ...crop,
+    x: Number.isFinite(crop.x) ? clamp(crop.x) : 0.5,
+    y: Number.isFinite(crop.y) ? clamp(crop.y) : 0.5,
     rotation,
     zoom:
       Number.isFinite(crop.zoom) && crop.zoom >= 0.5
@@ -232,6 +234,99 @@ function getPhotoLayout(photo, ratio) {
   }
 }
 
+function getThumbnailKey(photo, ratio) {
+  const crop = getCropForRatio(photo?.crop, ratio)
+  return [
+    ratio,
+    photo?.imageWidth || 0,
+    photo?.imageHeight || 0,
+    crop.x,
+    crop.y,
+    crop.zoom,
+    crop.rotation,
+  ].join('|')
+}
+
+function loadBlobImage(blob) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(blob)
+    const image = new Image()
+    const finish = () => URL.revokeObjectURL(objectUrl)
+
+    image.onload = () => {
+      resolve(image)
+      window.setTimeout(finish, 0)
+    }
+    image.onerror = () => {
+      finish()
+      reject(new Error('The browser could not decode the original photo.'))
+    }
+    image.src = objectUrl
+  })
+}
+
+async function generateCalendarThumbnail(photo, ratio) {
+  const imageBlob = photo?.imageBlob || photo?.blob
+  if (!imageBlob) throw new Error('The original photo Blob is missing.')
+
+  const image = await loadBlobImage(imageBlob)
+  const imageWidth = photo.imageWidth || image.naturalWidth
+  const imageHeight = photo.imageHeight || image.naturalHeight
+  if (!imageWidth || !imageHeight) {
+    throw new Error('The browser could not read the original photo dimensions.')
+  }
+
+  const frameRatio = photoRatios[ratio] || 1
+  const maximumThumbnailSide = 400
+  const thumbnailWidth = frameRatio >= 1
+    ? maximumThumbnailSide
+    : Math.max(1, Math.round(maximumThumbnailSide * frameRatio))
+  const thumbnailHeight = frameRatio >= 1
+    ? Math.max(1, Math.round(maximumThumbnailSide / frameRatio))
+    : maximumThumbnailSide
+  const crop = getCropForRatio(photo.crop, ratio)
+  const isSideways = crop.rotation % 180 !== 0
+  const rotatedWidth = isSideways ? imageHeight : imageWidth
+  const rotatedHeight = isSideways ? imageWidth : imageHeight
+  const containScale = Math.min(
+    thumbnailWidth / rotatedWidth,
+    thumbnailHeight / rotatedHeight,
+  )
+  const rotatedBoxWidth = rotatedWidth * containScale * crop.zoom
+  const rotatedBoxHeight = rotatedHeight * containScale * crop.zoom
+  const centerX = (thumbnailWidth - rotatedBoxWidth) * crop.x + rotatedBoxWidth / 2
+  const centerY = (thumbnailHeight - rotatedBoxHeight) * crop.y + rotatedBoxHeight / 2
+  const drawnWidth = isSideways ? rotatedBoxHeight : rotatedBoxWidth
+  const drawnHeight = isSideways ? rotatedBoxWidth : rotatedBoxHeight
+  const canvas = document.createElement('canvas')
+  canvas.width = thumbnailWidth
+  canvas.height = thumbnailHeight
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('The browser could not create a thumbnail canvas.')
+
+  context.fillStyle = '#f3efe5'
+  context.fillRect(0, 0, thumbnailWidth, thumbnailHeight)
+  context.save()
+  context.translate(centerX, centerY)
+  context.rotate((crop.rotation * Math.PI) / 180)
+  context.drawImage(
+    image,
+    -drawnWidth / 2,
+    -drawnHeight / 2,
+    drawnWidth,
+    drawnHeight,
+  )
+  context.restore()
+
+  return {
+    imageHeight,
+    imageWidth,
+    thumbnailDataUrl: canvas.toDataURL('image/jpeg', 0.86),
+    thumbnailKey: getThumbnailKey({ ...photo, imageHeight, imageWidth }, ratio),
+    thumbnailMimeType: 'image/jpeg',
+  }
+}
+
 function getInitialVisibleMonth() {
   const today = new Date()
 
@@ -287,6 +382,8 @@ function App() {
   const objectUrlsRef = useRef(new Set())
   const cropDragRef = useRef(null)
   const [calendarWorkspaceSize, setCalendarWorkspaceSize] = useState({ height: 0, width: 0 })
+  const thumbnailJobsRef = useRef(new Set())
+  const thumbnailRetryCountsRef = useRef(new Map())
 
   function createPhotoUrl(blob) {
     const url = URL.createObjectURL(blob)
@@ -313,7 +410,7 @@ function App() {
         }
 
         const restoredPhotos = {}
-        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop, imageWidth, imageHeight, note = '', showNoteInCalendar = false, highlight = false, highlightColor = '#f5edc9', marker = 'none', markerColor = '#b85c55' }) => {
+        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop, imageWidth, imageHeight, thumbnailDataUrl = null, thumbnailKey = '', thumbnailMimeType = '', note = '', showNoteInCalendar = false, highlight = false, highlightColor = '#f5edc9', marker = 'none', markerColor = '#b85c55' }) => {
           restoredPhotos[dateKey] = {
             crop,
             imageBlob,
@@ -326,6 +423,9 @@ function App() {
             highlightColor,
             marker,
             markerColor,
+            thumbnailDataUrl,
+            thumbnailKey,
+            thumbnailMimeType,
             url: imageBlob ? createPhotoUrl(imageBlob) : null,
           }
         })
@@ -428,6 +528,76 @@ function App() {
       mobileQuery.removeEventListener('change', updateEditorMode)
     }
   }, [])
+
+  useEffect(() => {
+    const monthPrefix = `${monthKey}-`
+
+    Object.entries(photosByDate).forEach(([dateKey, entry]) => {
+      if (!dateKey.startsWith(monthPrefix) || !entry.imageBlob) return
+      const expectedThumbnailKey = getThumbnailKey(entry, currentPhotoRatio)
+      if (
+        entry.thumbnailDataUrl
+        && entry.thumbnailKey === expectedThumbnailKey
+      ) return
+      if (thumbnailJobsRef.current.has(dateKey)) return
+      if ((thumbnailRetryCountsRef.current.get(dateKey) || 0) >= 2) return
+
+      thumbnailJobsRef.current.add(dateKey)
+      generateCalendarThumbnail(entry, currentPhotoRatio)
+        .then(async (thumbnail) => {
+          const updatedEntry = {
+            ...entry,
+            ...thumbnail,
+          }
+          await savePhotoRecord({
+            dateKey,
+            crop: updatedEntry.crop,
+            imageBlob: updatedEntry.imageBlob,
+            imageHeight: updatedEntry.imageHeight,
+            imageType: updatedEntry.imageType,
+            imageWidth: updatedEntry.imageWidth,
+            thumbnailDataUrl: updatedEntry.thumbnailDataUrl,
+            thumbnailKey: updatedEntry.thumbnailKey,
+            thumbnailMimeType: updatedEntry.thumbnailMimeType,
+            note: updatedEntry.note || '',
+            showNoteInCalendar: updatedEntry.showNoteInCalendar === true,
+            highlight: Boolean(updatedEntry.highlight),
+            highlightColor: updatedEntry.highlightColor || '#f5edc9',
+            marker: updatedEntry.marker || 'none',
+            markerColor: updatedEntry.markerColor || '#b85c55',
+          })
+          thumbnailJobsRef.current.delete(dateKey)
+          setPhotosByDate((currentEntries) => {
+            const currentEntry = currentEntries[dateKey]
+            if (!currentEntry?.imageBlob) return currentEntries
+            if (getThumbnailKey(currentEntry, currentPhotoRatio) !== thumbnail.thumbnailKey) {
+              return currentEntries
+            }
+            return {
+              ...currentEntries,
+              [dateKey]: { ...currentEntry, ...thumbnail },
+            }
+          })
+        })
+        .catch((error) => {
+          const retryCount = (thumbnailRetryCountsRef.current.get(dateKey) || 0) + 1
+          thumbnailRetryCountsRef.current.set(dateKey, retryCount)
+          thumbnailJobsRef.current.delete(dateKey)
+          console.error(`Could not generate the calendar thumbnail for ${dateKey}:`, error)
+          setPhotosByDate((currentEntries) => {
+            if (!currentEntries[dateKey]?.imageBlob) return currentEntries
+            return {
+              ...currentEntries,
+              [dateKey]: {
+                ...currentEntries[dateKey],
+                thumbnailDataUrl: null,
+                thumbnailKey: '',
+              },
+            }
+          })
+        })
+    })
+  }, [currentPhotoRatio, monthKey, photosByDate])
 
   const firstWeekday = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
@@ -893,6 +1063,27 @@ function App() {
     })
   }
 
+  function handleCalendarThumbnailLoad(dateKey) {
+    thumbnailRetryCountsRef.current.delete(dateKey)
+  }
+
+  function handleCalendarThumbnailError(dateKey, photo) {
+    const retryCount = (thumbnailRetryCountsRef.current.get(dateKey) || 0) + 1
+    thumbnailRetryCountsRef.current.set(dateKey, retryCount)
+    thumbnailJobsRef.current.delete(dateKey)
+    console.error(
+      `Could not display the calendar thumbnail for ${dateKey} (${photo.thumbnailMimeType || 'unknown type'}).`,
+    )
+    setPhotosByDate((currentEntries) => ({
+      ...currentEntries,
+      [dateKey]: {
+        ...currentEntries[dateKey],
+        thumbnailDataUrl: null,
+        thumbnailKey: '',
+      },
+    }))
+  }
+
   async function saveDayEntry() {
     const dateKey = getDateKey(
       selectedDate.getFullYear(),
@@ -914,6 +1105,34 @@ function App() {
     )
     const note = draftNote
     const showNoteInCalendar = Boolean(note.trim() && draftShowNoteInCalendar)
+    let thumbnail = null
+
+    if (photoToSave) {
+      const thumbnailSource = {
+        ...photoToSave,
+        imageBlob: photoToSave.blob,
+      }
+      const expectedThumbnailKey = getThumbnailKey(thumbnailSource, currentPhotoRatio)
+      if (
+        !pendingPhoto
+        && previousEntry?.thumbnailDataUrl
+        && previousEntry.thumbnailKey === expectedThumbnailKey
+      ) {
+        thumbnail = {
+          thumbnailDataUrl: previousEntry.thumbnailDataUrl,
+          thumbnailKey: previousEntry.thumbnailKey,
+          thumbnailMimeType: previousEntry.thumbnailMimeType || 'image/jpeg',
+        }
+      } else {
+        try {
+          thumbnail = await generateCalendarThumbnail(thumbnailSource, currentPhotoRatio)
+        } catch (error) {
+          console.error(`Could not generate the calendar thumbnail for ${dateKey}:`, error)
+          setFileError('当前浏览器无法显示这种图片格式，请尝试使用 JPG、PNG 或 WebP 图片。')
+          return
+        }
+      }
+    }
 
     try {
       const hasDayDecoration = draftHighlight || draftMarker !== 'none'
@@ -931,9 +1150,12 @@ function App() {
           ...(photoToSave && {
             crop: photoToSave.crop,
             imageBlob: photoToSave.blob,
-            imageHeight: photoToSave.imageHeight,
+            imageHeight: thumbnail?.imageHeight || photoToSave.imageHeight,
             imageType: photoToSave.type,
-            imageWidth: photoToSave.imageWidth,
+            imageWidth: thumbnail?.imageWidth || photoToSave.imageWidth,
+            thumbnailDataUrl: thumbnail.thumbnailDataUrl,
+            thumbnailKey: thumbnail.thumbnailKey,
+            thumbnailMimeType: thumbnail.thumbnailMimeType,
           }),
         })
       }
@@ -970,9 +1192,12 @@ function App() {
             ...(photoToSave && {
               crop: photoToSave.crop,
               imageBlob: photoToSave.blob,
-              imageHeight: photoToSave.imageHeight,
+              imageHeight: thumbnail?.imageHeight || photoToSave.imageHeight,
               imageType: photoToSave.type,
-              imageWidth: photoToSave.imageWidth,
+              imageWidth: thumbnail?.imageWidth || photoToSave.imageWidth,
+              thumbnailDataUrl: thumbnail.thumbnailDataUrl,
+              thumbnailKey: thumbnail.thumbnailKey,
+              thumbnailMimeType: thumbnail.thumbnailMimeType,
               url: savedPhotoUrl,
             }),
           },
@@ -1197,9 +1422,11 @@ function App() {
             const dateKey = day ? getDateKey(year, month, day) : null
             const entry = dateKey ? photosByDate[dateKey] : null
             const photo = entry?.imageBlob ? entry : null
-            const photoLayout = photo
-              ? getPhotoLayout(photo, currentPhotoRatio)
-              : null
+            const thumbnailIsCurrent = Boolean(
+              photo?.thumbnailDataUrl
+              && photo.thumbnailKey === getThumbnailKey(photo, currentPhotoRatio),
+            )
+            const thumbnailSrc = thumbnailIsCurrent ? photo.thumbnailDataUrl : null
             const hasVisibleNote = Boolean(entry?.note && entry.showNoteInCalendar === true)
             const cellContentLayout = previewLayout
               ? calculateCellContentLayout(previewLayout, {
@@ -1253,25 +1480,28 @@ function App() {
                       {photo && (
                         <div className="day-photo-area">
                           <div
-                            className="day-photo-frame"
+                            className={`day-photo-frame${thumbnailSrc ? ' is-loaded' : ' is-loading'}`}
                             style={{
                               aspectRatio: currentPhotoRatioValue,
+                              height: `${photoFrame.height}px`,
+                              width: `${photoFrame.width}px`,
                               '--photo-frame-width': `${photoFrame.width}px`,
                               '--photo-frame-height': `${photoFrame.height}px`,
                             }}
                             data-photo-ratio={currentPhotoRatio}
+                            aria-busy={!thumbnailSrc}
                           >
-                            <div
-                              className="photo-transform"
-                              style={photoLayout.wrapperStyle}
-                            >
+                            {thumbnailSrc ? (
                               <img
-                                src={photo.url}
+                                className="day-thumbnail"
+                                src={thumbnailSrc}
                                 alt=""
-                                style={photoLayout.imageStyle}
-                                onLoad={(event) => rememberPhotoDimensions(dateKey, event)}
+                                onLoad={() => handleCalendarThumbnailLoad(dateKey)}
+                                onError={() => handleCalendarThumbnailError(dateKey, photo)}
                               />
-                            </div>
+                            ) : (
+                              <span className="day-thumbnail-placeholder" aria-hidden="true" />
+                            )}
                           </div>
                         </div>
                       )}

@@ -461,6 +461,22 @@ body {
   background-color: #f3efe5;
 }
 
+.day-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 1;
+  visibility: visible;
+  object-fit: fill;
+}
+
+.day-thumbnail-placeholder {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: #eee9de;
+}
+
 .day-note-area {
   flex: 0 0 auto;
   box-sizing: border-box;
