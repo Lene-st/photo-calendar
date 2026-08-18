@@ -24,8 +24,113 @@ body {
   padding: 48px 24px;
 }
 
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  width: min(100%, 1350px);
+  margin: 0 auto 20px;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  border: 1px solid #d9d3c5;
+  border-radius: 6px;
+  background: #fffdf8;
+}
+
+.toolbar-date-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-date-controls select {
+  padding: 8px 10px;
+  border: 1px solid #c9c2b2;
+  border-radius: 3px;
+  color: #566052;
+  background: #fffdf8;
+  font: inherit;
+}
+
+.toolbar-export-button {
+  min-width: 120px;
+}
+
+.preview-zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #566052;
+  font-size: 0.86rem;
+}
+
+.preview-zoom-controls button {
+  min-width: 32px;
+  padding: 7px 9px;
+  border: 1px solid #c9c2b2;
+  border-radius: 3px;
+  color: inherit;
+  background: #fffdf8;
+  font: inherit;
+  cursor: pointer;
+}
+
+.preview-zoom-controls button:hover {
+  border-color: #8b9784;
+  background: #f4f3eb;
+}
+
+.preview-zoom-controls button:focus-visible {
+  outline: 3px solid rgba(106, 125, 98, 0.3);
+  outline-offset: 2px;
+}
+
+.preview-zoom-controls output {
+  min-width: 46px;
+  text-align: center;
+}
+
+.preview-zoom-controls .fit-preview-button {
+  min-width: auto;
+}
+
+.workspace-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1040px) 286px;
+  align-items: start;
+  justify-content: center;
+  gap: 24px;
+  width: 100%;
+}
+
+.calendar-workspace {
+  display: block;
+  min-width: 0;
+  height: calc(100vh - 180px);
+  min-height: 420px;
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 24px;
+}
+
+.paper-preview-scale-shell {
+  position: relative;
+  flex: none;
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.paper-preview-scale-shell > .paper-layout {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
 .calendar {
-  width: min(100%, 1040px);
+  box-sizing: border-box;
+  width: 100%;
   margin: 0 auto;
   padding: 32px;
   border: 1px solid var(--calendar-grid-color, #d9d3c5);
@@ -87,45 +192,107 @@ body {
   outline-offset: 2px;
 }
 
-.ratio-control {
+.calendar.paper-layout {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 10px;
-  color: #737b6e;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  flex: 0 0 auto;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
 }
 
-.ratio-control select {
-  padding: 5px 8px;
+.calendar.paper-layout .paper-month-header,
+.calendar.paper-layout .weekday-row {
+  flex: 0 0 auto;
+}
+
+.calendar.paper-layout .days-grid {
+  flex: 0 0 auto;
+  min-height: 0;
+  grid-template-rows: repeat(var(--calendar-rows), minmax(0, 1fr));
+}
+
+.calendar.paper-layout .day-cell {
+  height: auto;
+  min-height: 0;
+}
+
+.paper-month-header {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.paper-month-header h1 {
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--calendar-header-color, #343a32);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  line-height: 1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-sidebar {
+  position: sticky;
+  top: 20px;
+  box-sizing: border-box;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 24px 20px;
+  border: 1px solid #d9d3c5;
+  border-radius: 6px;
+  background-color: #fffdf8;
+  box-shadow: 0 10px 28px rgba(74, 65, 48, 0.07);
+}
+
+.calendar-sidebar h2 {
+  margin: 0;
+  color: #343a32;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.4rem;
+  font-weight: 500;
+}
+
+.sidebar-month {
+  margin: 6px 0 0;
+  color: #858b7f;
+  font-size: 0.82rem;
+}
+
+.custom-size-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.custom-size-fields label {
+  display: grid;
+  gap: 6px;
+  color: #566052;
+  font-size: 0.78rem;
+}
+
+.custom-size-fields input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px;
   border: 1px solid #c9c2b2;
   border-radius: 3px;
-  color: #566052;
-  background-color: var(--calendar-background, #fffdf8);
+  color: #3f443c;
+  background: #fffdf8;
   font: inherit;
-  cursor: pointer;
 }
 
-.ratio-control select:focus-visible {
-  outline: 3px solid rgba(106, 125, 98, 0.3);
-  outline-offset: 2px;
-}
-
-.customize-button {
-  display: block;
-  margin: 10px auto 0;
-  padding: 6px 12px;
-  border: 1px solid #c9c2b2;
-  border-radius: 3px;
-  color: #566052;
-  background-color: transparent;
-  font: inherit;
+.settings-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #965a4c;
   font-size: 0.78rem;
-  cursor: pointer;
 }
 
 .month-button {
@@ -163,14 +330,18 @@ body {
 }
 
 .weekday {
-  padding: 10px 4px;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 0 2px;
   border-bottom: 2px solid var(--calendar-grid-color, #a8b29f);
   color: var(--calendar-header-color, #737b6e);
-  font-size: 0.78rem;
+  font-size: var(--weekday-font-size, 0.78rem);
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: var(--weekday-letter-spacing, 0.08em);
   text-align: center;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .day-cell {
@@ -225,7 +396,7 @@ body {
 
 .date-button time {
   color: var(--calendar-date-color, #343a32);
-  font-size: 0.92rem;
+  font-size: var(--date-font-size, 0.92rem);
   font-weight: 600;
 }
 
@@ -233,11 +404,11 @@ body {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--marker-gap, 4px);
   box-sizing: border-box;
-  flex: 0 0 36px;
+  flex: 0 0 var(--date-header-height, 36px);
   width: 100%;
-  padding: 9px 10px;
+  padding: 0 var(--cell-padding, 10px);
   border-bottom: 1px solid var(--calendar-grid-color, #e4dfd4);
   background-color: transparent;
 }
@@ -256,22 +427,39 @@ body {
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: var(--content-gap, 7px);
   box-sizing: border-box;
   min-height: 0;
   overflow: hidden;
-  padding: 9px 8px;
+  padding: var(--content-padding-top, 4px) var(--content-padding-x, 8px) var(--content-padding-bottom, 4px);
+}
+
+.day-photo-area {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  width: 100%;
 }
 
 .day-photo-frame {
   position: relative;
   flex: 0 0 auto;
   overflow: hidden;
-  max-height: 82px;
+  max-height: var(--photo-frame-height, 82px);
   width: min(100%, var(--photo-frame-width));
   border: 1px solid #ddd6c8;
   border-radius: 2px;
   background-color: #f3efe5;
+}
+
+.day-note-area {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 100%;
+  overflow: hidden;
+  padding: var(--note-padding-y, 1px) 0;
 }
 
 .day-note-preview {
@@ -280,8 +468,8 @@ body {
   width: 100%;
   margin: 0;
   color: #596055;
-  font-size: 0.72rem;
-  line-height: 1.35;
+  font-size: var(--note-font-size, 0.72rem);
+  line-height: var(--note-line-height-px, 1.4em);
   text-align: left;
   white-space: pre-wrap;
   -webkit-box-orient: vertical;
@@ -289,21 +477,28 @@ body {
 }
 
 .day-marker {
-  font-size: 0.78rem;
+  flex: 0 0 auto;
+  font-size: var(--marker-star-size, 0.8em);
   line-height: 1;
 }
 
 .day-marker.dot {
-  font-size: 1rem;
+  width: var(--marker-dot-size, 0.35em);
+  height: var(--marker-dot-size, 0.35em);
+  overflow: hidden;
+  border-radius: 50%;
+  background: currentColor;
+  color: transparent !important;
 }
 
 .circle-marker {
   display: inline-grid;
-  min-width: 24px;
-  height: 24px;
+  flex: 0 0 var(--circle-size, 1.6em);
+  width: var(--circle-size, 1.6em);
+  height: var(--circle-size, 1.6em);
   place-items: center;
   box-sizing: border-box;
-  border: 2px solid currentColor;
+  border: var(--circle-border-width, 1px) solid currentColor;
   border-radius: 50%;
 }
 
@@ -494,6 +689,19 @@ body {
   margin: 16px 0 0;
   color: #63705e;
   font-size: 0.88rem;
+}
+
+.export-paper-note,
+.export-paper-help {
+  margin: 14px 0 0;
+  color: #63705e;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.export-paper-help {
+  margin-top: 6px;
+  color: #858b7f;
 }
 
 .export-message.error,
@@ -708,7 +916,7 @@ body {
 
 .zoom-control {
   display: grid;
-  grid-template-columns: auto 30px 1fr 30px 48px;
+  grid-template-columns: auto 40px 1fr 40px 48px;
   align-items: center;
   gap: 10px;
   margin-top: 18px;
@@ -719,13 +927,14 @@ body {
 
 .zoom-control input {
   width: 100%;
+  min-height: 32px;
   accent-color: #6f8068;
   cursor: pointer;
 }
 
 .zoom-control button {
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 1px solid #c9c2b2;
   border-radius: 3px;
@@ -862,12 +1071,11 @@ body {
   }
 
   .weekday {
-    font-size: 0.68rem;
     letter-spacing: 0.04em;
   }
 
   .day-cell {
-    height: var(--mobile-day-cell-height, 112px);
+    height: var(--day-cell-height, 190px);
   }
 
   .date-button {
@@ -875,27 +1083,31 @@ body {
   }
 
   .date-header {
-    flex-basis: 28px;
-    padding: 5px 6px;
-  }
-
-  .date-header time {
-    font-size: 0.82rem;
+    padding: 0 var(--cell-padding, 6px);
   }
 
   .day-content {
-    gap: 3px;
-    padding: 4px 3px;
+    gap: var(--content-gap, 3px);
+    padding: var(--content-padding-top, 3px) var(--content-padding-x, 3px) var(--content-padding-bottom, 3px);
   }
 
   .day-photo-frame {
-    max-height: 48px;
-    width: min(100%, var(--mobile-photo-frame-width));
+    max-height: var(--photo-frame-height, 82px);
+    width: min(100%, var(--photo-frame-width));
   }
 
   .day-note-preview {
-    font-size: 0.58rem;
-    -webkit-line-clamp: 2;
+    font-size: var(--note-font-size, 0.58rem);
+  }
+
+  .preview-zoom-controls {
+    gap: 4px;
+    font-size: 0.78rem;
+  }
+
+  .preview-zoom-controls button {
+    min-width: 30px;
+    padding: 6px;
   }
 
   .date-modal {
@@ -912,4 +1124,24 @@ body {
     padding: 18px;
   }
 
+}
+
+@media (max-width: 900px) {
+  .workspace-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .calendar-workspace {
+    height: min(75svh, 720px);
+    min-height: 420px;
+  }
+
+  .calendar {
+    max-width: 100%;
+  }
+
+  .calendar-sidebar {
+    position: static;
+    max-height: none;
+  }
 }

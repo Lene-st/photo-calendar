@@ -6,11 +6,15 @@ import {
 } from './photoDatabase.js'
 import CalendarExportView from './CalendarExportView.jsx'
 import { exportViewWidth, getExportViewHeight } from './calendarExportLayout.js'
+import { calculateCalendarLayout, calculateCellContentLayout } from './calendarLayout.js'
 import {
   getCellGap,
   getCornerRadius,
+  getExportDimensions,
+  getFittedCalendarSize,
   getMarkerSymbol,
   getMonthAppearance,
+  getPaperLayout,
   getPhotoFrameSize,
   photoRatios,
 } from './calendarAppearance.js'
@@ -36,7 +40,20 @@ const yearOptions = Array.from({ length: 101 }, (_, index) => 2000 + index)
 const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
 const visibleMonthStorageKey = 'photo-calendar-visible-month'
 const monthSettingsStorageKey = 'calendarMonthSettings'
-const exportWidth = 1920
+const previewZoomStorageKey = 'photo-calendar-preview-zoom'
+const defaultExportWidth = 1920
+
+function getInitialPreviewZoom() {
+  try {
+    const savedZoom = Number(localStorage.getItem(previewZoomStorageKey))
+    return Number.isFinite(savedZoom) && savedZoom >= 50 && savedZoom <= 200
+      ? savedZoom
+      : 100
+  } catch (error) {
+    console.error('Could not read the preview zoom:', error)
+    return 100
+  }
+}
 
 function getDateKey(year, month, day) {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -248,7 +265,6 @@ function App() {
   const [draftHighlightColor, setDraftHighlightColor] = useState('#f5edc9')
   const [draftMarker, setDraftMarker] = useState('none')
   const [draftMarkerColor, setDraftMarkerColor] = useState('#b85c55')
-  const [isCustomizeOpen, setIsCustomizeOpen] = useState(false)
   const [isApplyAppearanceConfirming, setIsApplyAppearanceConfirming] = useState(false)
   const [fileError, setFileError] = useState('')
   const [isExportModalOpen, setIsExportModalOpen] = useState(false)
@@ -257,10 +273,13 @@ function App() {
   const [activeExportCalendar, setActiveExportCalendar] = useState(null)
   const [exportFormat, setExportFormat] = useState('png')
   const [exportStatus, setExportStatus] = useState('')
+  const [previewZoom, setPreviewZoom] = useState(getInitialPreviewZoom)
   const fileInputRef = useRef(null)
   const exportViewRef = useRef(null)
+  const calendarWorkspaceRef = useRef(null)
   const objectUrlsRef = useRef(new Set())
   const cropDragRef = useRef(null)
+  const [calendarWorkspaceSize, setCalendarWorkspaceSize] = useState({ height: 0, width: 0 })
 
   function createPhotoUrl(blob) {
     const url = URL.createObjectURL(blob)
@@ -323,12 +342,36 @@ function App() {
     [],
   )
 
+  useEffect(() => {
+    const workspace = calendarWorkspaceRef.current
+    if (!workspace) return undefined
+
+    const updateWorkspaceSize = () => {
+      const styles = window.getComputedStyle(workspace)
+      const horizontalPadding = parseFloat(styles.paddingLeft) + parseFloat(styles.paddingRight)
+      const verticalPadding = parseFloat(styles.paddingTop) + parseFloat(styles.paddingBottom)
+      setCalendarWorkspaceSize({
+        height: Math.max(0, workspace.clientHeight - verticalPadding),
+        width: Math.max(0, workspace.clientWidth - horizontalPadding),
+      })
+    }
+    const observer = new ResizeObserver(updateWorkspaceSize)
+    observer.observe(workspace)
+    updateWorkspaceSize()
+
+    return () => observer.disconnect()
+  }, [])
+
   const year = visibleMonth.getFullYear()
   const month = visibleMonth.getMonth()
   const monthKey = getMonthKey(year, month)
   const currentAppearance = getMonthAppearance(monthSettings, monthKey)
+  const currentPaperLayout = getPaperLayout(currentAppearance)
   const currentPhotoRatio = currentAppearance.photoRatio
   const currentPhotoRatioValue = photoRatios[currentPhotoRatio]
+  const customSizeInvalid = currentAppearance.paperSize === 'custom' && (
+    currentAppearance.customWidth <= 0 || currentAppearance.customHeight <= 0
+  )
   const cropFrameWidth =
     currentPhotoRatioValue < 1 ? currentPhotoRatioValue * 320 : 360
 
@@ -354,13 +397,47 @@ function App() {
     }
   }, [monthSettings])
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(previewZoomStorageKey, String(previewZoom))
+    } catch (error) {
+      console.error('Could not save the preview zoom:', error)
+    }
+  }, [previewZoom])
+
   const firstWeekday = new Date(year, month, 1).getDay()
   const daysInMonth = new Date(year, month + 1, 0).getDate()
-  const calendarDays = [
+  const calendarDaysWithLeadingBlanks = [
     ...Array(firstWeekday).fill(null),
     ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
   ]
-  const calendarRows = Math.ceil(calendarDays.length / 7)
+  const calendarRows = Math.ceil(calendarDaysWithLeadingBlanks.length / 7)
+  const calendarDays = [
+    ...calendarDaysWithLeadingBlanks,
+    ...Array(calendarRows * 7 - calendarDaysWithLeadingBlanks.length).fill(null),
+  ]
+  const previewAspectRatio = currentPaperLayout.aspectRatio || (
+    exportViewWidth / getExportViewHeight(calendarRows)
+  )
+  const fittedCalendarSize = getFittedCalendarSize(
+    calendarWorkspaceSize.width,
+    calendarWorkspaceSize.height,
+    previewAspectRatio,
+  )
+  const previewLayout = fittedCalendarSize
+    ? calculateCalendarLayout({
+        paperWidth: fittedCalendarSize.width,
+        paperHeight: fittedCalendarSize.height,
+        weekCount: calendarRows,
+        cellGap: getCellGap(currentAppearance.cellGap),
+        photoRatio: currentPhotoRatio,
+        showNotes: currentAppearance.showNotes,
+        noteLines: currentAppearance.noteLines,
+      })
+    : null
+  const previewScale = previewZoom / 100
+  const scaledPreviewWidth = (fittedCalendarSize?.width || 0) * previewScale
+  const scaledPreviewHeight = (fittedCalendarSize?.height || 0) * previewScale
   const currentCellGap = getCellGap(currentAppearance.cellGap)
   const currentCornerRadius = getCornerRadius(currentAppearance.cornerStyle)
   const exportStartIndex = exportFrom
@@ -373,9 +450,9 @@ function App() {
     ? exportEndIndex - exportStartIndex + 1
     : 0
   const exportValidationMessage = exportMonthCount < 1
-    ? 'Start month must be earlier than or equal to end month.'
+    ? '开始月份必须早于或等于结束月份。'
     : exportMonthCount > 24
-      ? 'You can export up to 24 months at a time.'
+      ? '一次最多可以导出 24 个月。'
       : ''
 
   async function blobUrlToDataUrl(url) {
@@ -426,11 +503,19 @@ function App() {
       throw new Error('The calendar export view was not rendered.')
     }
 
-    const outputHeight = Math.round(
-      (getExportViewHeight(calendarWithDimensions.rows) / exportViewWidth) * exportWidth,
+    const defaultOutputHeight = Math.round(
+      (getExportViewHeight(
+        calendarWithDimensions.rows,
+        getPaperLayout(calendarWithDimensions.appearance).aspectRatio,
+      ) / exportViewWidth) * defaultExportWidth,
+    )
+    const { width: outputWidth, height: outputHeight } = getExportDimensions(
+      calendarWithDimensions.appearance,
+      defaultExportWidth,
+      defaultOutputHeight,
     )
     const svg = exportViewRef.current.cloneNode(true)
-    svg.setAttribute('width', exportWidth)
+    svg.setAttribute('width', outputWidth)
     svg.setAttribute('height', outputHeight)
     const images = Array.from(svg.querySelectorAll('image'))
     await Promise.all(images.map(async (image) => {
@@ -453,12 +538,12 @@ function App() {
       })
 
       const canvas = document.createElement('canvas')
-      canvas.width = exportWidth
+      canvas.width = outputWidth
       canvas.height = outputHeight
       const context = canvas.getContext('2d')
       context.fillStyle = '#fffdf8'
-      context.fillRect(0, 0, exportWidth, outputHeight)
-      context.drawImage(image, 0, 0, exportWidth, outputHeight)
+      context.fillRect(0, 0, outputWidth, outputHeight)
+      context.drawImage(image, 0, 0, outputWidth, outputHeight)
 
       const mimeType = exportFormat === 'jpg' ? 'image/jpeg' : 'image/png'
       const imageBlob = await new Promise((resolve, reject) => {
@@ -488,7 +573,7 @@ function App() {
   }
 
   function closeExportModal() {
-    if (!exportStatus.startsWith('Exporting')) {
+    if (!exportStatus.startsWith('正在导出')) {
       setIsExportModalOpen(false)
       setActiveExportCalendar(null)
     }
@@ -511,20 +596,20 @@ function App() {
         monthSettings,
         today,
       )
-      setExportStatus(`Exporting ${index + 1} / ${exportMonthCount}...`)
+      setExportStatus(`正在导出 ${index + 1} / ${exportMonthCount}……`)
 
       try {
         await downloadCalendar(calendar, fileName)
       } catch (error) {
         console.error(`Could not export ${calendar.title}:`, error)
-        setExportStatus('Failed to export this calendar.')
+        setExportStatus('导出失败，请重试。')
         setActiveExportCalendar(null)
         return
       }
     }
 
     setActiveExportCalendar(null)
-    setExportStatus('Export complete.')
+    setExportStatus('导出完成。')
   }
 
   function changeMonth(offset) {
@@ -698,7 +783,7 @@ function App() {
     }
 
     if (!allowedImageTypes.includes(file.type)) {
-      setFileError('Please choose a JPG, PNG, or WebP image.')
+      setFileError('当前浏览器暂不支持显示这种图片格式，请尝试使用 JPG、PNG 或 WebP 图片。')
       return
     }
 
@@ -747,6 +832,10 @@ function App() {
         crop: currentPhoto.crop,
       }
     })
+  }
+
+  function handlePendingImageError() {
+    setFileError('当前浏览器无法显示这张图片，请尝试使用 JPG、PNG 或 WebP 图片。')
   }
 
   function rememberPhotoDimensions(dateKey, event) {
@@ -809,6 +898,10 @@ function App() {
         })
       }
 
+      const savedPhotoUrl = photoToSave
+        ? createPhotoUrl(photoToSave.blob)
+        : null
+
       setPhotosByDate((currentPhotos) => {
         const currentEntry = currentPhotos[dateKey]
         if (!photoToSave && !note.trim() && !hasDayDecoration) {
@@ -818,8 +911,11 @@ function App() {
           return updatedEntries
         }
 
-        if (currentEntry?.url !== photoToSave?.url) {
+        if (currentEntry?.url !== savedPhotoUrl) {
           releasePhotoUrl(currentEntry?.url)
+        }
+        if (photoToSave?.url && photoToSave.url !== currentEntry?.url) {
+          releasePhotoUrl(photoToSave.url)
         }
 
         return {
@@ -836,7 +932,7 @@ function App() {
               imageHeight: photoToSave.imageHeight,
               imageType: photoToSave.type,
               imageWidth: photoToSave.imageWidth,
-              url: photoToSave.url,
+              url: savedPhotoUrl,
             }),
           },
         }
@@ -847,7 +943,7 @@ function App() {
       setFileError('')
     } catch (error) {
       console.error(`Could not save the entry for ${dateKey}:`, error)
-      setFileError('The entry could not be saved. Please try again.')
+      setFileError('保存失败，请重试。')
     }
   }
 
@@ -938,84 +1034,88 @@ function App() {
 
   return (
     <main className="calendar-page">
+      <nav className="calendar-toolbar" aria-label="月历工具栏">
+        <button className="month-button" type="button" onClick={() => changeMonth(-1)} aria-label="上一个月">
+          <span aria-hidden="true">←</span><span>上个月</span>
+        </button>
+        <div className="toolbar-date-controls">
+          <select value={month} onChange={selectMonth} aria-label="选择月份">
+            {monthNames.map((monthName, monthIndex) => (
+              <option value={monthIndex} key={monthName}>{monthName}</option>
+            ))}
+          </select>
+          <select value={year} onChange={changeYear} aria-label="选择年份">
+            {yearOptions.map((yearOption) => (
+              <option value={yearOption} key={yearOption}>{yearOption}</option>
+            ))}
+          </select>
+          <button className="today-button" type="button" onClick={goToToday}>今天</button>
+        </div>
+        <button className="month-button" type="button" onClick={() => changeMonth(1)} aria-label="下一个月">
+          <span>下个月</span><span aria-hidden="true">→</span>
+        </button>
+        <button className="export-button toolbar-export-button" type="button" onClick={openExportModal}>导出月历</button>
+        <div className="preview-zoom-controls" aria-label="预览缩放">
+          <span>预览</span>
+          <button type="button" onClick={() => setPreviewZoom((zoom) => Math.max(50, zoom - 25))} aria-label="缩小预览">−</button>
+          <output aria-live="polite">{previewZoom}%</output>
+          <button type="button" onClick={() => setPreviewZoom((zoom) => Math.min(200, zoom + 25))} aria-label="放大预览">＋</button>
+          <button className="fit-preview-button" type="button" onClick={() => setPreviewZoom(100)}>适应窗口</button>
+        </div>
+      </nav>
+
+      <div className="workspace-layout">
+      <div className="calendar-workspace" ref={calendarWorkspaceRef}>
+      <div
+        className="paper-preview-scale-shell"
+        style={{
+          height: `${scaledPreviewHeight}px`,
+          width: `${scaledPreviewWidth}px`,
+          marginTop: `${Math.max(0, (calendarWorkspaceSize.height - scaledPreviewHeight) / 2)}px`,
+        }}
+      >
       <section
-        className="calendar"
+        className="calendar paper-layout"
         aria-label={monthFormatter.format(visibleMonth)}
         style={{
           '--calendar-background': currentAppearance.backgroundColor,
           '--calendar-grid-color': currentAppearance.gridColor,
           '--calendar-date-color': currentAppearance.dateTextColor,
           '--calendar-header-color': currentAppearance.headerTextColor,
+          aspectRatio: previewAspectRatio,
+          ...(fittedCalendarSize && {
+            height: `${fittedCalendarSize.height}px`,
+            width: `${fittedCalendarSize.width}px`,
+          }),
+          transform: `scale(${previewScale})`,
+          transformOrigin: 'top left',
           borderRadius: `${currentCornerRadius}px`,
         }}
       >
-        <header className="calendar-header">
-          <button
-            className="month-button"
-            type="button"
-            onClick={() => changeMonth(-1)}
-            aria-label="Previous month"
-          >
-            <span aria-hidden="true">←</span>
-            <span>Previous</span>
-          </button>
-
-          <div className="calendar-title">
-            <h1>{monthFormatter.format(visibleMonth)}</h1>
-
-            <div className="date-jump-controls">
-              <select
-                value={month}
-                onChange={selectMonth}
-                aria-label="Choose month"
-              >
-                {monthNames.map((monthName, monthIndex) => (
-                  <option value={monthIndex} key={monthName}>
-                    {monthName}
-                  </option>
-                ))}
-              </select>
-
-              <select value={year} onChange={changeYear} aria-label="Choose year">
-                {yearOptions.map((yearOption) => (
-                  <option value={yearOption} key={yearOption}>
-                    {yearOption}
-                  </option>
-                ))}
-              </select>
-
-              <button className="today-button" type="button" onClick={goToToday}>
-                Today
-              </button>
-            </div>
-
-            <label className="ratio-control">
-              <span>Photo Ratio</span>
-              <select value={currentPhotoRatio} onChange={changePhotoRatio}>
-                {Object.keys(photoRatios).map((ratio) => (
-                  <option value={ratio} key={ratio}>
-                    {ratio}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button className="customize-button" type="button" onClick={() => setIsCustomizeOpen(true)}>
-              Customize
-            </button>
-          </div>
-
-          <button
-            className="month-button"
-            type="button"
-            onClick={() => changeMonth(1)}
-            aria-label="Next month"
-          >
-            <span>Next</span>
-            <span aria-hidden="true">→</span>
-          </button>
+        <header
+          className="paper-month-header"
+          style={{
+            height: `${previewLayout?.monthHeaderHeight || 0}px`,
+            marginBottom: `${previewLayout?.sectionGap || 0}px`,
+            marginTop: `${previewLayout?.pagePadding || 0}px`,
+            paddingInline: `${previewLayout?.pagePadding || 0}px`,
+          }}
+        >
+          <h1 style={{ fontSize: `${previewLayout?.monthTitleFontSize || 14}px` }}>
+            {monthFormatter.format(visibleMonth)}
+          </h1>
         </header>
 
-        <div className="weekday-row" aria-hidden="true">
+        <div
+          className="weekday-row"
+          aria-hidden="true"
+          style={{
+            height: `${previewLayout?.weekdayHeaderHeight || 0}px`,
+            margin: `0 ${previewLayout?.pagePadding || 0}px ${previewLayout?.sectionGap || 0}px`,
+            '--weekday-font-size': `${previewLayout?.weekdayFontSize || 6}px`,
+            '--weekday-letter-spacing': `${previewLayout?.weekdayLetterSpacing || 0.3}px`,
+          }}
+        >
           {weekdays.map((weekday) => (
             <div className="weekday" key={weekday}>
               {weekday}
@@ -1027,8 +1127,26 @@ function App() {
           className={`days-grid${currentCellGap ? ' spaced' : ''}`}
           style={{
             gap: `${currentCellGap}px`,
-            '--day-cell-height': `${190 - (currentCellGap * (calendarRows - 1)) / calendarRows}px`,
-            '--mobile-day-cell-height': `${112 - (currentCellGap * (calendarRows - 1)) / calendarRows}px`,
+            height: `${previewLayout?.gridHeight || 0}px`,
+            marginInline: `${previewLayout?.pagePadding || 0}px`,
+            '--calendar-rows': calendarRows,
+            '--date-font-size': `${previewLayout?.dateFontSize || 7}px`,
+            '--date-header-height': `${previewLayout?.dateHeaderHeight || 0}px`,
+            '--day-cell-height': `${previewLayout?.cellHeight || 0}px`,
+            '--note-font-size': `${previewLayout?.noteFontSize || 5}px`,
+            '--cell-padding': `${previewLayout?.cellPadding || 1}px`,
+            '--content-gap': `${previewLayout?.contentGap || 1}px`,
+            '--content-padding-x': `${previewLayout?.contentPaddingX || 1}px`,
+            '--content-padding-top': `${previewLayout?.contentPaddingTop || 1}px`,
+            '--content-padding-bottom': `${previewLayout?.contentPaddingBottom || 1}px`,
+            '--circle-size': `${previewLayout?.circleSize || 10}px`,
+            '--circle-border-width': `${previewLayout?.circleBorderWidth || 1}px`,
+            '--marker-dot-size': `${previewLayout?.markerDotSize || 3}px`,
+            '--marker-star-size': `${previewLayout?.markerStarSize || 6}px`,
+            '--marker-gap': `${previewLayout?.markerGap || 2}px`,
+            '--note-line-height': previewLayout?.noteLineHeight || 1.4,
+            '--note-line-height-px': `${previewLayout?.noteLineHeightPx || 9.8}px`,
+            '--note-padding-y': `${previewLayout?.notePaddingY || 1}px`,
           }}
         >
           {calendarDays.map((day, index) => {
@@ -1038,7 +1156,18 @@ function App() {
             const photoLayout = photo
               ? getPhotoLayout(photo, currentPhotoRatio)
               : null
-            const photoFrame = getPhotoFrameSize(currentPhotoRatio, 112, 82)
+            const hasVisibleNote = Boolean(currentAppearance.showNotes && entry?.note)
+            const cellContentLayout = previewLayout
+              ? calculateCellContentLayout(previewLayout, {
+                  hasNote: hasVisibleNote,
+                  noteLineCount: currentAppearance.noteLines,
+                })
+              : null
+            const photoFrame = getPhotoFrameSize(
+              currentPhotoRatio,
+              previewLayout?.photoMaxWidth || 1,
+              cellContentLayout?.photoAreaHeight || 1,
+            )
 
             return (
               <div
@@ -1076,34 +1205,41 @@ function App() {
                         </span>
                       )}
                     </div>
-                    <div className="day-content">
+                    <div className={`day-content${photo ? ' has-photo' : ''}${hasVisibleNote ? ' has-note' : ''}`}>
                       {photo && (
-                        <div
-                          className="day-photo-frame"
-                          style={{
-                            aspectRatio: currentPhotoRatioValue,
-                            '--photo-frame-width': `${photoFrame.width}px`,
-                            '--mobile-photo-frame-width': `${Math.min(66, 48 * currentPhotoRatioValue)}px`,
-                          }}
-                          data-photo-ratio={currentPhotoRatio}
-                        >
+                        <div className="day-photo-area">
                           <div
-                            className="photo-transform"
-                            style={photoLayout.wrapperStyle}
+                            className="day-photo-frame"
+                            style={{
+                              aspectRatio: currentPhotoRatioValue,
+                              '--photo-frame-width': `${photoFrame.width}px`,
+                              '--photo-frame-height': `${photoFrame.height}px`,
+                            }}
+                            data-photo-ratio={currentPhotoRatio}
                           >
-                            <img
-                              src={photo.url}
-                              alt=""
-                              style={photoLayout.imageStyle}
-                              onLoad={(event) => rememberPhotoDimensions(dateKey, event)}
-                            />
+                            <div
+                              className="photo-transform"
+                              style={photoLayout.wrapperStyle}
+                            >
+                              <img
+                                src={photo.url}
+                                alt=""
+                                style={photoLayout.imageStyle}
+                                onLoad={(event) => rememberPhotoDimensions(dateKey, event)}
+                              />
+                            </div>
                           </div>
                         </div>
                       )}
                       {currentAppearance.showNotes && entry?.note && (
-                        <p className="day-note-preview" style={{ '--note-lines': currentAppearance.noteLines }}>
-                          {entry.note}
-                        </p>
+                        <div
+                          className="day-note-area"
+                          style={{ height: `${cellContentLayout?.noteAreaHeight || 0}px` }}
+                        >
+                          <p className="day-note-preview" style={{ '--note-lines': currentAppearance.noteLines }}>
+                            {entry.note}
+                          </p>
+                        </div>
                       )}
                       {!photo && !(currentAppearance.showNotes && entry?.note) && <span className="day-empty-mark" aria-hidden="true">·</span>}
                     </div>
@@ -1114,22 +1250,50 @@ function App() {
           })}
         </div>
       </section>
+      </div>
+      </div>
 
-      {isCustomizeOpen && (
-        <div className="modal-overlay" onMouseDown={(event) => {
-          if (event.target === event.currentTarget) setIsCustomizeOpen(false)
-        }}>
-          <section className="date-modal customize-modal" role="dialog" aria-modal="true" aria-labelledby="customize-title">
-            <button className="modal-x-button" type="button" onClick={() => setIsCustomizeOpen(false)} aria-label="Close customize dialog">×</button>
-            <p className="modal-label">Current month</p>
-            <h2 id="customize-title">Customize Calendar</h2>
+      <aside className="calendar-sidebar" aria-label="月历设置">
+        <h2>月历设置</h2>
+        <p className="sidebar-month">{monthFormatter.format(visibleMonth)}</p>
+        <div className="customize-fields">
+              <label className="customize-select-field">
+                <span>纸张尺寸</span>
+                <select value={currentAppearance.paperSize} onChange={(event) => changeMonthAppearance('paperSize', event.target.value)}>
+                  <option value="default">默认</option>
+                  <option value="a4">A4</option>
+                  <option value="a5">A5</option>
+                  <option value="a6">A6</option>
+                  <option value="custom">自定义</option>
+                </select>
+              </label>
+              <label className="customize-select-field">
+                <span>方向</span>
+                <select value={currentAppearance.orientation} onChange={(event) => changeMonthAppearance('orientation', event.target.value)}>
+                  <option value="landscape">横向</option>
+                  <option value="portrait">纵向</option>
+                </select>
+              </label>
+              {currentAppearance.paperSize === 'custom' && (
+                <div className="custom-size-fields">
+                  <label><span>宽度（mm）</span><input type="number" min="1" value={currentAppearance.customWidth} onChange={(event) => changeMonthAppearance('customWidth', Number(event.target.value))} /></label>
+                  <label><span>高度（mm）</span><input type="number" min="1" value={currentAppearance.customHeight} onChange={(event) => changeMonthAppearance('customHeight', Number(event.target.value))} /></label>
+                  {customSizeInvalid && <p className="settings-error">请输入有效的宽度和高度。</p>}
+                </div>
+              )}
 
-            <div className="customize-fields">
+              <label className="customize-select-field">
+                <span>图片比例</span>
+                <select value={currentPhotoRatio} onChange={changePhotoRatio}>
+                  {Object.keys(photoRatios).map((ratio) => <option value={ratio} key={ratio}>{ratio}</option>)}
+                </select>
+              </label>
+
               {[
-                ['backgroundColor', 'Calendar Background'],
-                ['gridColor', 'Grid Color'],
-                ['dateTextColor', 'Date Text Color'],
-                ['headerTextColor', 'Header Text Color'],
+                ['backgroundColor', '月历背景'],
+                ['gridColor', '网格颜色'],
+                ['dateTextColor', '日期颜色'],
+                ['headerTextColor', '标题颜色'],
               ].map(([field, label]) => (
                 <label className="color-field" key={field}>
                   <span>{label}</span>
@@ -1139,13 +1303,13 @@ function App() {
               ))}
 
               <label className="toggle-field">
-                <span>Show Notes on Calendar</span>
+                <span>月历显示文字</span>
                 <input type="checkbox" checked={currentAppearance.showNotes} onChange={(event) => changeMonthAppearance('showNotes', event.target.checked)} />
               </label>
 
               {currentAppearance.showNotes && (
                 <label className="customize-select-field">
-                  <span>Note Preview Lines</span>
+                  <span>文字显示行数</span>
                   <select value={currentAppearance.noteLines} onChange={(event) => changeMonthAppearance('noteLines', Number(event.target.value))}>
                     <option value="1">1</option>
                     <option value="2">2</option>
@@ -1155,42 +1319,35 @@ function App() {
               )}
 
               <label className="customize-select-field">
-                <span>Corner Style</span>
+                <span>圆角</span>
                 <select value={currentAppearance.cornerStyle} onChange={(event) => changeMonthAppearance('cornerStyle', event.target.value)}>
-                  <option value="square">Square</option>
-                  <option value="slightly-rounded">Slightly Rounded</option>
-                  <option value="rounded">Rounded</option>
+                  <option value="square">直角</option>
+                  <option value="slightly-rounded">轻微圆角</option>
+                  <option value="rounded">圆角</option>
                 </select>
               </label>
 
               <label className="customize-select-field">
-                <span>Cell Spacing</span>
+                <span>日期格间距</span>
                 <select value={currentAppearance.cellGap} onChange={(event) => changeMonthAppearance('cellGap', event.target.value)}>
-                  <option value="none">None</option>
-                  <option value="small">Small</option>
+                  <option value="none">无</option>
+                  <option value="small">小</option>
                 </select>
               </label>
             </div>
 
             {isApplyAppearanceConfirming ? (
               <div className="apply-confirmation">
-                <p>Apply this appearance to all months? Day entries will not be changed.</p>
-                <button className="add-photo-button" type="button" onClick={applyAppearanceToAllMonths}>Confirm</button>
-                <button className="close-button" type="button" onClick={() => setIsApplyAppearanceConfirming(false)}>Cancel</button>
+                <p>将当前外观应用到所有月份？照片和日期记录不会改变。</p>
+                <button className="add-photo-button" type="button" onClick={applyAppearanceToAllMonths}>确认</button>
+                <button className="close-button" type="button" onClick={() => setIsApplyAppearanceConfirming(false)}>取消</button>
               </div>
             ) : (
               <button className="close-button apply-all-button" type="button" onClick={() => setIsApplyAppearanceConfirming(true)}>
-                Apply Appearance to All Months
+                应用到所有月份
               </button>
             )}
-          </section>
-        </div>
-      )}
-
-      <div className="export-entry">
-        <button className="export-button" type="button" onClick={openExportModal}>
-          Export Calendars
-        </button>
+      </aside>
       </div>
 
       {isExportModalOpen && exportFrom && exportTo && (
@@ -1198,38 +1355,38 @@ function App() {
           if (event.target === event.currentTarget) closeExportModal()
         }}>
           <section className="date-modal export-modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
-            <button className="modal-x-button" type="button" onClick={closeExportModal} aria-label="Close export dialog">×</button>
-            <p className="modal-label">{exportFormat.toUpperCase()} export</p>
-            <h2 id="export-modal-title">Export Calendars</h2>
+            <button className="modal-x-button" type="button" onClick={closeExportModal} aria-label="关闭导出窗口">×</button>
+            <p className="modal-label">{exportFormat.toUpperCase()} 导出</p>
+            <h2 id="export-modal-title">导出月历</h2>
 
             <div className="export-range">
               <fieldset>
-                <legend>From</legend>
+                <legend>开始月份</legend>
                 <label>
-                  <span>Month</span>
-                  <select aria-label="From month" value={exportFrom.month} onChange={(event) => setExportFrom({ ...exportFrom, month: Number(event.target.value) })}>
+                  <span>月份</span>
+                  <select aria-label="开始月份" value={exportFrom.month} onChange={(event) => setExportFrom({ ...exportFrom, month: Number(event.target.value) })}>
                     {monthNames.map((name, index) => <option value={index} key={name}>{name}</option>)}
                   </select>
                 </label>
                 <label>
-                  <span>Year</span>
-                  <select aria-label="From year" value={exportFrom.year} onChange={(event) => setExportFrom({ ...exportFrom, year: Number(event.target.value) })}>
+                  <span>年份</span>
+                  <select aria-label="开始年份" value={exportFrom.year} onChange={(event) => setExportFrom({ ...exportFrom, year: Number(event.target.value) })}>
                     {yearOptions.map((option) => <option value={option} key={option}>{option}</option>)}
                   </select>
                 </label>
               </fieldset>
 
               <fieldset>
-                <legend>To</legend>
+                <legend>结束月份</legend>
                 <label>
-                  <span>Month</span>
-                  <select aria-label="To month" value={exportTo.month} onChange={(event) => setExportTo({ ...exportTo, month: Number(event.target.value) })}>
+                  <span>月份</span>
+                  <select aria-label="结束月份" value={exportTo.month} onChange={(event) => setExportTo({ ...exportTo, month: Number(event.target.value) })}>
                     {monthNames.map((name, index) => <option value={index} key={name}>{name}</option>)}
                   </select>
                 </label>
                 <label>
-                  <span>Year</span>
-                  <select aria-label="To year" value={exportTo.year} onChange={(event) => setExportTo({ ...exportTo, year: Number(event.target.value) })}>
+                  <span>年份</span>
+                  <select aria-label="结束年份" value={exportTo.year} onChange={(event) => setExportTo({ ...exportTo, year: Number(event.target.value) })}>
                     {yearOptions.map((option) => <option value={option} key={option}>{option}</option>)}
                   </select>
                 </label>
@@ -1237,25 +1394,27 @@ function App() {
             </div>
 
             <label className="export-format-field">
-              <span>Export Format</span>
+              <span>导出格式</span>
               <select value={exportFormat} onChange={(event) => setExportFormat(event.target.value)}>
                 <option value="png">PNG</option>
                 <option value="jpg">JPG</option>
               </select>
             </label>
+            <p className="export-paper-note">纸张尺寸：跟随月份设置<br />方向：跟随月份设置</p>
+            <p className="export-paper-help">导出将使用各月份设置的纸张尺寸和方向。</p>
 
             {exportValidationMessage ? (
               <p className="export-message error">{exportValidationMessage}</p>
             ) : (
-              <p className="export-message">{exportMonthCount} {exportMonthCount === 1 ? 'calendar' : 'calendars'} will be exported.</p>
+              <p className="export-message">将导出 {exportMonthCount} 张月历。</p>
             )}
-            {exportStatus && <p className={`export-status${exportStatus.startsWith('Failed') ? ' error' : ''}`} aria-live="polite">{exportStatus}</p>}
+            {exportStatus && <p className={`export-status${exportStatus.startsWith('导出失败') ? ' error' : ''}`} aria-live="polite">{exportStatus}</p>}
 
             <div className="modal-actions">
-              <button className="add-photo-button" type="button" onClick={exportCalendars} disabled={Boolean(exportValidationMessage) || exportStatus.startsWith('Exporting')}>
-                Export {exportFormat.toUpperCase()}
+              <button className="add-photo-button" type="button" onClick={exportCalendars} disabled={Boolean(exportValidationMessage) || exportStatus.startsWith('正在导出')}>
+                导出 {exportFormat.toUpperCase()}
               </button>
-              <button className="close-button" type="button" onClick={closeExportModal}>Close</button>
+              <button className="close-button" type="button" onClick={closeExportModal}>关闭</button>
             </div>
           </section>
         </div>
@@ -1277,12 +1436,12 @@ function App() {
               className="modal-x-button"
               type="button"
               onClick={closeDateModal}
-              aria-label="Close"
+              aria-label="关闭"
             >
               ×
             </button>
 
-            <p className="modal-label">Selected date</p>
+            <p className="modal-label">所选日期</p>
             <h2 id="date-modal-title">
               {fullDateFormatter.format(selectedDate)}
             </h2>
@@ -1299,7 +1458,7 @@ function App() {
               <>
                 {pendingPhoto ? (
                   <div className="crop-section">
-                <p className="crop-title">Crop Photo</p>
+                <p className="crop-title">调整图片</p>
                 <div className="crop-editor">
                   <div
                     className="crop-frame"
@@ -1322,18 +1481,19 @@ function App() {
                         draggable="false"
                         style={pendingPhotoLayout.imageStyle}
                         onLoad={handlePendingImageLoad}
+                        onError={handlePendingImageError}
                       />
                     </div>
                   </div>
                 </div>
-                <p className="crop-help">Drag the photo to choose the area to keep.</p>
+                <p className="crop-help">拖动图片来调整保留区域。</p>
 
                 <div className="zoom-control">
-                  <label htmlFor="photo-zoom">Zoom</label>
+                  <label htmlFor="photo-zoom">缩放</label>
                   <button
                     type="button"
                     onClick={() => adjustZoom(-0.05)}
-                    aria-label="Zoom out"
+                    aria-label="缩小"
                   >
                     −
                   </button>
@@ -1349,7 +1509,7 @@ function App() {
                   <button
                     type="button"
                     onClick={() => adjustZoom(0.05)}
-                    aria-label="Zoom in"
+                    aria-label="放大"
                   >
                     +
                   </button>
@@ -1359,17 +1519,17 @@ function App() {
                 </div>
 
                 <div className="rotate-controls">
-                  <span>Rotate</span>
+                  <span>旋转</span>
                   <button type="button" onClick={() => rotatePhoto(-90)}>
-                    ↺ Rotate Left
+                    ↺ 向左旋转
                   </button>
                   <button type="button" onClick={() => rotatePhoto(90)}>
-                    Rotate Right ↻
+                    向右旋转 ↻
                   </button>
                 </div>
 
                 <button className="reset-crop-button" type="button" onClick={resetCrop}>
-                  Reset
+                  重置
                 </button>
                   </div>
                 ) : savedPhoto && !isPhotoRemoved ? (
@@ -1399,39 +1559,39 @@ function App() {
                 ) : null}
 
                 <label className="note-field">
-                  <span>Note</span>
+                  <span>文字记录</span>
                   <textarea
                     value={draftNote}
                     onChange={(event) => setDraftNote(event.target.value)}
                     rows="5"
-                    placeholder="Write something about this day..."
+                    placeholder="记录这一天……"
                   />
                 </label>
 
                 <div className="day-decoration-fields">
                   <label className="toggle-field">
-                    <span>Highlight Day</span>
+                    <span>日期高亮</span>
                     <input type="checkbox" checked={draftHighlight} onChange={(event) => setDraftHighlight(event.target.checked)} />
                   </label>
                   {draftHighlight && (
                     <label className="color-field compact">
-                      <span>Highlight Color</span>
+                      <span>高亮颜色</span>
                       <input type="color" value={draftHighlightColor} onChange={(event) => setDraftHighlightColor(event.target.value)} />
                       <output>{draftHighlightColor.toUpperCase()}</output>
                     </label>
                   )}
                   <label className="customize-select-field">
-                    <span>Marker</span>
+                    <span>日期标记</span>
                     <select value={draftMarker} onChange={(event) => setDraftMarker(event.target.value)}>
-                      <option value="none">None</option>
-                      <option value="dot">Dot</option>
-                      <option value="circle">Circle</option>
-                      <option value="star">Star</option>
+                      <option value="none">无</option>
+                      <option value="dot">圆点</option>
+                      <option value="circle">圆圈</option>
+                      <option value="star">星标</option>
                     </select>
                   </label>
                   {draftMarker !== 'none' && (
                     <label className="color-field compact">
-                      <span>Marker Color</span>
+                      <span>标记颜色</span>
                       <input type="color" value={draftMarkerColor} onChange={(event) => setDraftMarkerColor(event.target.value)} />
                       <output>{draftMarkerColor.toUpperCase()}</output>
                     </label>
@@ -1442,26 +1602,26 @@ function App() {
 
                 <div className="photo-edit-actions">
                   <button className="close-button" type="button" onClick={choosePhoto}>
-                    {visibleEditPhoto ? 'Replace Photo' : 'Add Photo'}
+                    {visibleEditPhoto ? '更换图片' : '添加图片'}
                   </button>
                   {savedPhoto && !isPhotoRemoved && !pendingPhoto && (
                     <button className="close-button" type="button" onClick={adjustSavedPhoto}>
-                      Adjust Crop
+                      调整图片
                     </button>
                   )}
                   {visibleEditPhoto && (
                     <button className="delete-photo-button" type="button" onClick={removePhotoFromDraft}>
-                      Delete Photo
+                      删除图片
                     </button>
                   )}
                 </div>
 
                 <div className="modal-actions">
                   <button className="add-photo-button" type="button" onClick={saveDayEntry}>
-                    Save
+                    保存
                   </button>
                   <button className="close-button" type="button" onClick={cancelDayEdit}>
-                    Cancel
+                    取消
                   </button>
                 </div>
               </>
@@ -1498,14 +1658,14 @@ function App() {
                   </div>
                 )}
                 {selectedEntry?.note && <p className="day-view-note">{selectedEntry.note}</p>}
-                {!savedPhoto && !selectedEntry?.note && <p className="day-empty-state">No entry for this day.</p>}
+                {!savedPhoto && !selectedEntry?.note && <p className="day-empty-state">当天暂无记录。</p>}
 
                 <div className="modal-actions">
                   <button className="add-photo-button" type="button" onClick={startEditingDay}>
-                    {selectedEntry ? 'Edit' : 'Add Entry'}
+                    {selectedEntry ? '编辑' : '添加记录'}
                   </button>
                   <button className="close-button" type="button" onClick={closeDateModal}>
-                    Close
+                    关闭
                   </button>
                 </div>
               </>

@@ -1,17 +1,15 @@
 import {
-  exportCellHeight,
-  exportPagePadding,
-  exportTitleHeight,
   exportViewWidth,
-  exportWeekdayHeight,
   getExportViewHeight,
 } from './calendarExportLayout.js'
 import {
   getCellGap,
   getCornerRadius,
   getMarkerSymbol,
+  getPaperLayout,
   getPhotoFrameSize,
 } from './calendarAppearance.js'
+import { calculateCalendarLayout, calculateCellContentLayout } from './calendarLayout.js'
 
 function ExportPhoto({ photo, frame, clipId }) {
   const crop = photo.crop
@@ -45,7 +43,7 @@ function ExportPhoto({ photo, frame, clipId }) {
   )
 }
 
-function getNoteLines(note, maxLines, maxCharacters = 20) {
+function getNoteLines(note, maxLines, maxCharacters) {
   if (!note) return []
   const characters = Array.from(note.replace(/\s+/g, ' ').trim())
   const lines = []
@@ -62,14 +60,31 @@ function getNoteLines(note, maxLines, maxCharacters = 20) {
 
 export default function CalendarExportView({ calendar, svgRef }) {
   const appearance = calendar.appearance
-  const height = getExportViewHeight(calendar.rows)
-  const gridWidth = exportViewWidth - exportPagePadding * 2
+  const paperLayout = getPaperLayout(appearance)
+  const height = getExportViewHeight(calendar.rows, paperLayout.aspectRatio)
   const cellGap = getCellGap(appearance.cellGap, 1.5)
-  const cellWidth = (gridWidth - cellGap * 6) / 7
-  const gridHeight = exportCellHeight * calendar.rows
-  const cellHeight = (gridHeight - cellGap * (calendar.rows - 1)) / calendar.rows
+  const layout = calculateCalendarLayout({
+    paperWidth: exportViewWidth,
+    paperHeight: height,
+    weekCount: calendar.rows,
+    cellGap,
+    photoRatio: calendar.photoRatioName,
+    showNotes: appearance.showNotes,
+    noteLines: appearance.noteLines,
+  })
+  const {
+    cellHeight,
+    cellWidth,
+    gridWidth,
+    monthHeaderHeight: titleHeight,
+    monthTitleFontSize: titleFontSize,
+    pagePadding,
+    sectionGap,
+    weekdayFontSize,
+    weekdayHeaderHeight: weekdayHeight,
+  } = layout
   const cornerRadius = getCornerRadius(appearance.cornerStyle) * 1.5
-  const gridY = exportPagePadding + exportTitleHeight + exportWeekdayHeight
+  const gridY = pagePadding + titleHeight + sectionGap + weekdayHeight + sectionGap
 
   return (
     <svg
@@ -83,10 +98,10 @@ export default function CalendarExportView({ calendar, svgRef }) {
     >
       <rect width={exportViewWidth} height={height} fill={appearance.backgroundColor} />
       <rect
-        x={exportPagePadding}
-        y={exportPagePadding}
+        x={pagePadding}
+        y={pagePadding}
         width={gridWidth}
-        height={height - exportPagePadding * 2}
+        height={height - pagePadding * 2}
         fill={appearance.backgroundColor}
         stroke={appearance.gridColor}
         strokeWidth="2"
@@ -95,12 +110,12 @@ export default function CalendarExportView({ calendar, svgRef }) {
 
       <text
         x={exportViewWidth / 2}
-        y={exportPagePadding + exportTitleHeight / 2}
+        y={pagePadding + titleHeight / 2}
         textAnchor="middle"
         dominantBaseline="central"
         fill={appearance.headerTextColor}
         fontFamily="Georgia, 'Times New Roman', serif"
-        fontSize="48"
+        fontSize={titleFontSize}
       >
         {calendar.title}
       </text>
@@ -108,13 +123,13 @@ export default function CalendarExportView({ calendar, svgRef }) {
       {calendar.weekdays.map((weekday, index) => (
         <text
           key={weekday}
-          x={exportPagePadding + (cellWidth + cellGap) * index + cellWidth / 2}
-          y={exportPagePadding + exportTitleHeight + exportWeekdayHeight / 2}
+          x={pagePadding + (cellWidth + cellGap) * index + cellWidth / 2}
+          y={pagePadding + titleHeight + sectionGap + weekdayHeight / 2}
           textAnchor="middle"
           dominantBaseline="central"
           fill={appearance.headerTextColor}
           fontFamily="Arial, sans-serif"
-          fontSize="20"
+          fontSize={weekdayFontSize}
           fontWeight="600"
         >
           {weekday}
@@ -125,23 +140,31 @@ export default function CalendarExportView({ calendar, svgRef }) {
         const entry = calendar.days[index] || null
         const column = index % 7
         const row = Math.floor(index / 7)
-        const cellX = exportPagePadding + column * (cellWidth + cellGap)
+        const cellX = pagePadding + column * (cellWidth + cellGap)
         const cellY = gridY + row * (cellHeight + cellGap)
-        const padding = 10
-        const dateHeaderHeight = 38
+        const padding = layout.contentPaddingX
+        const paddingTop = layout.contentPaddingTop
+        const dateHeaderHeight = layout.dateHeaderHeight
+        const dateFontSize = layout.dateFontSize
+        const noteFontSize = layout.noteFontSize
+        const noteLineHeight = layout.noteLineHeightPx
+        const noteCharacters = Math.max(6, Math.floor((cellWidth - padding * 2) / (noteFontSize * 0.58)))
         const noteLines = entry && appearance.showNotes
-          ? getNoteLines(entry.note, appearance.noteLines)
+          ? getNoteLines(entry.note, appearance.noteLines, noteCharacters)
           : []
-        const noteLineHeight = 17
-        const noteHeight = noteLines.length ? noteLines.length * noteLineHeight + 10 : 0
+        const cellContentLayout = calculateCellContentLayout(layout, {
+          hasNote: noteLines.length > 0,
+          noteLineCount: appearance.noteLines,
+        })
+        const contentGap = entry?.photo ? cellContentLayout.photoNoteGap : 0
         const availableWidth = cellWidth - padding * 2
-        const availableHeight = cellHeight - dateHeaderHeight - padding * 2 - noteHeight
-        const frameSize = getPhotoFrameSize(calendar.photoRatioName, availableWidth, availableHeight)
+        const photoAreaHeight = cellContentLayout.photoAreaHeight
+        const frameSize = getPhotoFrameSize(calendar.photoRatioName, availableWidth, photoAreaHeight)
         const frameWidth = frameSize.width
         const frameHeight = frameSize.height
         const frame = {
           x: cellX + (cellWidth - frameWidth) / 2,
-          y: cellY + dateHeaderHeight + padding + (availableHeight - frameHeight) / 2,
+          y: cellY + dateHeaderHeight + paddingTop + (photoAreaHeight - frameHeight) / 2,
           width: frameWidth,
           height: frameHeight,
         }
@@ -184,32 +207,36 @@ export default function CalendarExportView({ calendar, svgRef }) {
             </defs>
             {entry.photo && <ExportPhoto photo={entry.photo} frame={frame} clipId={clipId} />}
             <text
-              x={cellX + 12}
+              x={entry.marker === 'circle'
+                ? cellX + padding + layout.circleSize / 2
+                : cellX + padding}
               y={cellY + dateHeaderHeight / 2}
-              textAnchor="start"
+              textAnchor={entry.marker === 'circle' ? 'middle' : 'start'}
               dominantBaseline="central"
               fill={appearance.dateTextColor}
               fontFamily="Arial, sans-serif"
-              fontSize="18"
+              fontSize={dateFontSize}
               fontWeight="600"
             >
               {entry.day}
             </text>
             {entry.marker === 'circle' && (
-              <circle cx={cellX + 20} cy={cellY + dateHeaderHeight / 2} r="14" fill="none" stroke={entry.markerColor} strokeWidth="2" />
+              <circle cx={cellX + padding + layout.circleSize / 2} cy={cellY + dateHeaderHeight / 2} r={layout.circleSize / 2} fill="none" stroke={entry.markerColor} strokeWidth={layout.circleBorderWidth} />
             )}
             {entry.marker !== 'none' && entry.marker !== 'circle' && (
-              <text x={cellX + 40} y={cellY + dateHeaderHeight / 2} dominantBaseline="central" fill={entry.markerColor} fontSize="18">
+              <text x={cellX + padding + dateFontSize + layout.markerGap} y={cellY + dateHeaderHeight / 2} dominantBaseline="central" fill={entry.markerColor} fontSize={entry.marker === 'dot' ? layout.markerDotSize : layout.markerStarSize}>
                 {getMarkerSymbol(entry.marker)}
               </text>
             )}
             {noteLines.length > 0 && (
               <text
                 x={cellX + padding}
-                y={cellY + cellHeight - noteHeight + 14}
+                y={(entry.photo
+                  ? cellY + dateHeaderHeight + paddingTop + photoAreaHeight + contentGap
+                  : cellY + dateHeaderHeight + paddingTop) + layout.notePaddingY + noteFontSize}
                 fill={appearance.dateTextColor}
                 fontFamily="Arial, sans-serif"
-                fontSize="13"
+                fontSize={noteFontSize}
               >
                 {noteLines.map((line, lineIndex) => (
                   <tspan x={cellX + padding} dy={lineIndex === 0 ? 0 : noteLineHeight} key={`${entry.dateKey}-note-${lineIndex}`}>
