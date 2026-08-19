@@ -5,15 +5,13 @@ import {
   savePhotoRecord,
 } from './photoDatabase.js'
 import CalendarExportView from './CalendarExportView.jsx'
-import { calculateCalendarLayout, calculateCellContentLayout, calculateEditorCalendarLayout, calculateMobileCalendarLayout } from './calendarLayout.js'
+import { calculateExportDimensions, EXPORT_QUALITY_PRESETS, exportViewWidth } from './calendarExportLayout.js'
+import { calculateCellContentLayout, calculateEditorCalendarLayout, calculateMobileCalendarLayout } from './calendarLayout.js'
 import {
   getCellGap,
   getCornerRadius,
-  getRatioExportDimensions,
-  getFittedCalendarSize,
   getMarkerSymbol,
   getMonthAppearance,
-  getPageLayout,
   getPhotoFrameSize,
   photoRatios,
 } from './calendarAppearance.js'
@@ -40,7 +38,17 @@ const allowedImageTypes = ['image/jpeg', 'image/png', 'image/webp']
 const visibleMonthStorageKey = 'photo-calendar-visible-month'
 const monthSettingsStorageKey = 'calendarMonthSettings'
 const previewZoomStorageKey = 'photo-calendar-preview-zoom'
-const exportLongEdge = 2400
+const exportQualityStorageKey = 'exportQuality'
+
+function getInitialExportQuality() {
+  try {
+    const savedQuality = localStorage.getItem(exportQualityStorageKey)
+    return Object.hasOwn(EXPORT_QUALITY_PRESETS, savedQuality) ? savedQuality : 'high'
+  } catch (error) {
+    console.error('Could not read the export quality:', error)
+    return 'high'
+  }
+}
 
 function getInitialPreviewZoom() {
   try {
@@ -64,6 +72,14 @@ function getMonthKey(year, month) {
 
 function getMonthIndex(year, month) {
   return year * 12 + month
+}
+
+function isEntryStarred(entry) {
+  return entry?.isStarred === true || entry?.marker === 'star'
+}
+
+function isEntryCircled(entry) {
+  return entry?.isCircled === true || entry?.marker === 'circle'
 }
 
 function getCalendarExportData(year, month, photosByDate, monthSettings, today) {
@@ -99,6 +115,8 @@ function getCalendarExportData(year, month, photosByDate, monthSettings, today) 
         highlightColor: entry?.highlightColor || '#f5edc9',
         marker: entry?.marker || 'none',
         markerColor: entry?.markerColor || '#b85c55',
+        isStarred: isEntryStarred(entry),
+        isCircled: isEntryCircled(entry),
         isToday:
           day === today.getDate() &&
           month === today.getMonth() &&
@@ -364,6 +382,8 @@ function App() {
   const [draftHighlight, setDraftHighlight] = useState(false)
   const [draftHighlightColor, setDraftHighlightColor] = useState('#f5edc9')
   const [draftMarker, setDraftMarker] = useState('none')
+  const [draftIsStarred, setDraftIsStarred] = useState(false)
+  const [draftIsCircled, setDraftIsCircled] = useState(false)
   const [draftMarkerColor, setDraftMarkerColor] = useState('#b85c55')
   const [isApplyAppearanceConfirming, setIsApplyAppearanceConfirming] = useState(false)
   const [fileError, setFileError] = useState('')
@@ -372,6 +392,7 @@ function App() {
   const [exportTo, setExportTo] = useState(null)
   const [activeExportCalendar, setActiveExportCalendar] = useState(null)
   const [exportFormat, setExportFormat] = useState('png')
+  const [exportQuality, setExportQuality] = useState(getInitialExportQuality)
   const [exportStatus, setExportStatus] = useState('')
   const [previewZoom, setPreviewZoom] = useState(getInitialPreviewZoom)
   const [isDesktopEditor, setIsDesktopEditor] = useState(false)
@@ -410,7 +431,7 @@ function App() {
         }
 
         const restoredPhotos = {}
-        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop, imageWidth, imageHeight, thumbnailDataUrl = null, thumbnailKey = '', thumbnailMimeType = '', note = '', showNoteInCalendar = false, highlight = false, highlightColor = '#f5edc9', marker = 'none', markerColor = '#b85c55' }) => {
+        photoRecords.forEach(({ dateKey, imageBlob, imageType, crop, imageWidth, imageHeight, thumbnailDataUrl = null, thumbnailKey = '', thumbnailMimeType = '', note = '', showNoteInCalendar = false, highlight = false, highlightColor = '#f5edc9', marker = 'none', markerColor = '#b85c55', isStarred, isCircled }) => {
           restoredPhotos[dateKey] = {
             crop,
             imageBlob,
@@ -423,6 +444,8 @@ function App() {
             highlightColor,
             marker,
             markerColor,
+            isStarred: isStarred === true || marker === 'star',
+            isCircled: isCircled === true || marker === 'circle',
             thumbnailDataUrl,
             thumbnailKey,
             thumbnailMimeType,
@@ -474,12 +497,8 @@ function App() {
   const month = visibleMonth.getMonth()
   const monthKey = getMonthKey(year, month)
   const currentAppearance = getMonthAppearance(monthSettings, monthKey)
-  const currentPageLayout = getPageLayout(currentAppearance)
   const currentPhotoRatio = currentAppearance.photoRatio
   const currentPhotoRatioValue = photoRatios[currentPhotoRatio]
-  const customRatioInvalid = currentAppearance.pageRatio === 'custom' && (
-    currentAppearance.customRatioWidth <= 0 || currentAppearance.customRatioHeight <= 0
-  )
   const cropFrameWidth =
     currentPhotoRatioValue < 1 ? currentPhotoRatioValue * 320 : 360
 
@@ -512,6 +531,14 @@ function App() {
       console.error('Could not save the preview zoom:', error)
     }
   }, [previewZoom])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(exportQualityStorageKey, exportQuality)
+    } catch (error) {
+      console.error('Could not save the export quality:', error)
+    }
+  }, [exportQuality])
 
   useEffect(() => {
     const desktopQuery = window.matchMedia('(min-width: 901px)')
@@ -565,6 +592,8 @@ function App() {
             highlightColor: updatedEntry.highlightColor || '#f5edc9',
             marker: updatedEntry.marker || 'none',
             markerColor: updatedEntry.markerColor || '#b85c55',
+            isStarred: isEntryStarred(updatedEntry),
+            isCircled: isEntryCircled(updatedEntry),
           })
           thumbnailJobsRef.current.delete(dateKey)
           setPhotosByDate((currentEntries) => {
@@ -610,44 +639,41 @@ function App() {
     ...calendarDaysWithLeadingBlanks,
     ...Array(calendarRows * 7 - calendarDaysWithLeadingBlanks.length).fill(null),
   ]
-  const previewAspectRatio = currentPageLayout.aspectRatio
-  const workspaceFittedCalendarSize = getFittedCalendarSize(
-    calendarWorkspaceSize.width,
-    calendarWorkspaceSize.height,
-    previewAspectRatio,
-  )
+  const monthVisibleNoteLines = calendarDays.some((day) => {
+    if (!day) return false
+    const entry = photosByDate[getDateKey(year, month, day)]
+    return Boolean(entry?.note && entry.showNoteInCalendar === true)
+  }) ? currentAppearance.noteLines : 0
   const editorLayout = isDesktopEditor && calendarWorkspaceSize.width
     ? calculateEditorCalendarLayout({
         calendarWidth: calendarWorkspaceSize.width,
-        pageAspectRatio: previewAspectRatio,
         weekCount: calendarRows,
         cellGap: getCellGap(currentAppearance.cellGap),
         photoRatio: currentPhotoRatio,
+        noteLines: monthVisibleNoteLines,
       })
     : null
   const mobileLayout = isMobileEditor && calendarWorkspaceSize.width
     ? calculateMobileCalendarLayout({
         calendarWidth: calendarWorkspaceSize.width,
-        pageAspectRatio: previewAspectRatio,
         weekCount: calendarRows,
         cellGap: getCellGap(currentAppearance.cellGap),
         photoRatio: currentPhotoRatio,
+        noteLines: monthVisibleNoteLines,
       })
     : null
-  const naturalEditorLayout = editorLayout || mobileLayout
-  const calendarDisplaySize = naturalEditorLayout
-    ? { height: naturalEditorLayout.calendarHeight, width: calendarWorkspaceSize.width }
-    : workspaceFittedCalendarSize
-  const previewLayout = naturalEditorLayout || (workspaceFittedCalendarSize
-    ? calculateCalendarLayout({
-        paperWidth: workspaceFittedCalendarSize.width,
-        paperHeight: workspaceFittedCalendarSize.height,
+  const previewLayout = editorLayout || mobileLayout || (calendarWorkspaceSize.width
+    ? calculateEditorCalendarLayout({
+        calendarWidth: calendarWorkspaceSize.width,
         weekCount: calendarRows,
         cellGap: getCellGap(currentAppearance.cellGap),
         photoRatio: currentPhotoRatio,
-        noteLines: currentAppearance.noteLines,
+        noteLines: monthVisibleNoteLines,
       })
     : null)
+  const calendarDisplaySize = previewLayout
+    ? { height: previewLayout.calendarHeight, width: calendarWorkspaceSize.width }
+    : null
   const previewScale = isMobileEditor ? 1 : previewZoom / 100
   const scaledPreviewWidth = (calendarDisplaySize?.width || 0) * previewScale
   const scaledPreviewHeight = (calendarDisplaySize?.height || 0) * previewScale
@@ -667,6 +693,21 @@ function App() {
     : exportMonthCount > 24
       ? '一次最多可以导出 24 个月。'
       : ''
+  const exportPreviewCalendar = getCalendarExportData(year, month, photosByDate, monthSettings, today)
+  const exportPreviewLayout = calculateEditorCalendarLayout({
+    calendarWidth: exportViewWidth,
+    weekCount: exportPreviewCalendar.rows,
+    cellGap: getCellGap(exportPreviewCalendar.appearance.cellGap),
+    photoRatio: exportPreviewCalendar.photoRatioName,
+    noteLines: exportPreviewCalendar.days.some((entry) => entry?.note && entry.showNoteInCalendar)
+      ? exportPreviewCalendar.appearance.noteLines
+      : 0,
+  })
+  const estimatedExportDimensions = calculateExportDimensions(
+    exportViewWidth,
+    exportPreviewLayout.calendarHeight,
+    EXPORT_QUALITY_PRESETS[exportQuality],
+  )
 
   async function blobUrlToDataUrl(url) {
     const response = await fetch(url)
@@ -716,9 +757,11 @@ function App() {
       throw new Error('The calendar export view was not rendered.')
     }
 
-    const { width: outputWidth, height: outputHeight } = getRatioExportDimensions(
-      calendarWithDimensions.appearance,
-      exportLongEdge,
+    const viewBox = exportViewRef.current.viewBox.baseVal
+    const { width: outputWidth, height: outputHeight } = calculateExportDimensions(
+      viewBox.width,
+      viewBox.height,
+      EXPORT_QUALITY_PRESETS[exportQuality],
     )
     const svg = exportViewRef.current.cloneNode(true)
     svg.setAttribute('width', outputWidth)
@@ -747,6 +790,7 @@ function App() {
       canvas.width = outputWidth
       canvas.height = outputHeight
       const context = canvas.getContext('2d')
+      if (!context) throw new Error('The browser could not create the export canvas.')
       context.fillStyle = '#fffdf8'
       context.fillRect(0, 0, outputWidth, outputHeight)
       context.drawImage(image, 0, 0, outputWidth, outputHeight)
@@ -808,7 +852,9 @@ function App() {
         await downloadCalendar(calendar, fileName)
       } catch (error) {
         console.error(`Could not export ${calendar.title}:`, error)
-        setExportStatus('导出失败，请重试。')
+        setExportStatus(exportQuality === 'ultra'
+          ? '当前设备可能无法完成超清导出，请尝试选择高清或标准。'
+          : '导出失败，请重试。')
         setActiveExportCalendar(null)
         return
       }
@@ -942,6 +988,8 @@ function App() {
     setDraftHighlight(Boolean(photosByDate[dateKey]?.highlight))
     setDraftHighlightColor(photosByDate[dateKey]?.highlightColor || '#f5edc9')
     setDraftMarker(photosByDate[dateKey]?.marker || 'none')
+    setDraftIsStarred(isEntryStarred(photosByDate[dateKey]))
+    setDraftIsCircled(isEntryCircled(photosByDate[dateKey]))
     setDraftMarkerColor(photosByDate[dateKey]?.markerColor || '#b85c55')
     setIsEditingDay(false)
     setIsPhotoRemoved(false)
@@ -965,6 +1013,8 @@ function App() {
     setDraftHighlight(Boolean(selectedEntry?.highlight))
     setDraftHighlightColor(selectedEntry?.highlightColor || '#f5edc9')
     setDraftMarker(selectedEntry?.marker || 'none')
+    setDraftIsStarred(isEntryStarred(selectedEntry))
+    setDraftIsCircled(isEntryCircled(selectedEntry))
     setDraftMarkerColor(selectedEntry?.markerColor || '#b85c55')
     setPendingPhoto(null)
     setIsPhotoRemoved(false)
@@ -1135,7 +1185,8 @@ function App() {
     }
 
     try {
-      const hasDayDecoration = draftHighlight || draftMarker !== 'none'
+      const legacyMarker = draftMarker === 'dot' ? 'dot' : 'none'
+      const hasDayDecoration = draftHighlight || draftIsStarred || draftIsCircled || legacyMarker === 'dot'
       if (!photoToSave && !note.trim() && !hasDayDecoration) {
         await deletePhotoRecord(dateKey)
       } else {
@@ -1145,8 +1196,10 @@ function App() {
           showNoteInCalendar,
           highlight: draftHighlight,
           highlightColor: draftHighlightColor,
-          marker: draftMarker,
+          marker: legacyMarker,
           markerColor: draftMarkerColor,
+          isStarred: draftIsStarred,
+          isCircled: draftIsCircled,
           ...(photoToSave && {
             crop: photoToSave.crop,
             imageBlob: photoToSave.blob,
@@ -1187,8 +1240,10 @@ function App() {
             showNoteInCalendar,
             highlight: draftHighlight,
             highlightColor: draftHighlightColor,
-            marker: draftMarker,
+            marker: legacyMarker,
             markerColor: draftMarkerColor,
+            isStarred: draftIsStarred,
+            isCircled: draftIsCircled,
             ...(photoToSave && {
               crop: photoToSave.crop,
               imageBlob: photoToSave.blob,
@@ -1223,6 +1278,8 @@ function App() {
     setDraftHighlight(Boolean(selectedEntry?.highlight))
     setDraftHighlightColor(selectedEntry?.highlightColor || '#f5edc9')
     setDraftMarker(selectedEntry?.marker || 'none')
+    setDraftIsStarred(isEntryStarred(selectedEntry))
+    setDraftIsCircled(isEntryCircled(selectedEntry))
     setDraftMarkerColor(selectedEntry?.markerColor || '#b85c55')
     setIsPhotoRemoved(false)
     setIsEditingDay(false)
@@ -1351,7 +1408,6 @@ function App() {
           '--calendar-grid-color': currentAppearance.gridColor,
           '--calendar-date-color': currentAppearance.dateTextColor,
           '--calendar-header-color': currentAppearance.headerTextColor,
-          aspectRatio: previewAspectRatio,
           ...(calendarDisplaySize && {
             height: `${calendarDisplaySize.height}px`,
             width: `${calendarDisplaySize.width}px`,
@@ -1442,7 +1498,7 @@ function App() {
 
             return (
               <div
-                className={`day-cell${day === null ? ' empty' : ''}${
+                className={`day-cell${day === null ? ' empty' : ''}${entry?.highlight ? ' is-highlighted' : ''}${
                   isToday(day) ? ' today' : ''
                 }`}
                 key={`${year}-${month}-${index}`}
@@ -1450,6 +1506,7 @@ function App() {
                   backgroundColor: entry?.highlight
                     ? entry.highlightColor
                     : currentAppearance.backgroundColor,
+                  '--day-highlight-color': entry?.highlight ? entry.highlightColor : undefined,
                   borderColor: currentAppearance.gridColor,
                   borderRadius: `${currentCornerRadius}px`,
                   color: currentAppearance.dateTextColor,
@@ -1464,16 +1521,19 @@ function App() {
                   >
                     <div className="date-header">
                       <time
-                        className={entry?.marker === 'circle' ? 'circle-marker' : ''}
+                        className={isEntryCircled(entry) ? 'circle-marker' : ''}
                         dateTime={dateKey}
-                        style={entry?.marker === 'circle' ? { borderColor: entry.markerColor } : undefined}
+                        style={isEntryCircled(entry) ? { borderColor: entry.markerColor } : undefined}
                       >
                         {day}
                       </time>
-                      {entry?.marker && entry.marker !== 'none' && entry.marker !== 'circle' && (
+                      {entry?.marker === 'dot' && (
                         <span className={`day-marker ${entry.marker}`} style={{ color: entry.markerColor }}>
                           {getMarkerSymbol(entry.marker)}
                         </span>
+                      )}
+                      {isEntryStarred(entry) && (
+                        <span className="day-marker star" style={{ color: entry.markerColor }} aria-label="星号标记">★</span>
                       )}
                     </div>
                     <div className={`day-content${photo ? ' has-photo' : ''}${hasVisibleNote ? ' has-note' : ''}`}>
@@ -1532,34 +1592,7 @@ function App() {
         <p className="sidebar-month">{monthFormatter.format(visibleMonth)}</p>
         <div className="customize-fields">
               <label className="customize-select-field">
-                <span>页面比例</span>
-                <select value={currentAppearance.pageRatio} onChange={(event) => changeMonthAppearance('pageRatio', event.target.value)}>
-                  <option value="default">默认</option>
-                  <option value="4:3">4:3</option>
-                  <option value="3:2">3:2</option>
-                  <option value="16:9">16:9</option>
-                  <option value="1:1">1:1</option>
-                  <option value="custom">自定义</option>
-                </select>
-                <small className="setting-help">页面比例会同时影响当前月历布局和导出图片。</small>
-              </label>
-              <label className="customize-select-field">
-                <span>方向</span>
-                <select value={currentAppearance.orientation} onChange={(event) => changeMonthAppearance('orientation', event.target.value)}>
-                  <option value="landscape">横向</option>
-                  <option value="portrait">纵向</option>
-                </select>
-              </label>
-              {currentAppearance.pageRatio === 'custom' && (
-                <div className="custom-ratio-fields">
-                  <label><span>宽度比例</span><input type="number" min="0.1" step="0.1" value={currentAppearance.customRatioWidth} onChange={(event) => changeMonthAppearance('customRatioWidth', Number(event.target.value))} /></label>
-                  <label><span>高度比例</span><input type="number" min="0.1" step="0.1" value={currentAppearance.customRatioHeight} onChange={(event) => changeMonthAppearance('customRatioHeight', Number(event.target.value))} /></label>
-                  {customRatioInvalid && <p className="settings-error">请输入有效的页面比例。</p>}
-                </div>
-              )}
-
-              <label className="customize-select-field">
-                <span>图片比例</span>
+                <span>照片展示比例</span>
                 <select value={currentPhotoRatio} onChange={changePhotoRatio}>
                   {Object.keys(photoRatios).map((ratio) => <option value={ratio} key={ratio}>{ratio}</option>)}
                 </select>
@@ -1669,15 +1702,23 @@ function App() {
                 <option value="jpg">JPG</option>
               </select>
             </label>
-            <p className="export-page-note">页面比例：跟随月份设置<br />方向：跟随月份设置</p>
-            <p className="export-page-help">导出使用固定高清长边 2400px，并保持各月份的页面比例。</p>
+            <label className="export-format-field">
+              <span>导出清晰度</span>
+              <select value={exportQuality} onChange={(event) => setExportQuality(event.target.value)}>
+                <option value="standard">标准</option>
+                <option value="high">高清</option>
+                <option value="ultra">超清</option>
+              </select>
+            </label>
+            <p className="export-page-note">预计尺寸：{estimatedExportDimensions.width} × {estimatedExportDimensions.height} px</p>
+            <p className="export-page-help">每个月按实际月历布局比例重新进行高分辨率渲染。</p>
 
             {exportValidationMessage ? (
               <p className="export-message error">{exportValidationMessage}</p>
             ) : (
               <p className="export-message">将导出 {exportMonthCount} 张月历。</p>
             )}
-            {exportStatus && <p className={`export-status${exportStatus.startsWith('导出失败') ? ' error' : ''}`} aria-live="polite">{exportStatus}</p>}
+            {exportStatus && <p className={`export-status${exportStatus.includes('失败') || exportStatus.startsWith('当前设备') ? ' error' : ''}`} aria-live="polite">{exportStatus}</p>}
 
             <div className="modal-actions">
               <button className="add-photo-button" type="button" onClick={exportCalendars} disabled={Boolean(exportValidationMessage) || exportStatus.startsWith('正在导出')}>
@@ -1847,8 +1888,17 @@ function App() {
                 </label>
 
                 <div className="day-decoration-fields">
+                  <h3>日期标记</h3>
                   <label className="toggle-field">
-                    <span>日期高亮</span>
+                    <span>☆ 星号</span>
+                    <input type="checkbox" checked={draftIsStarred} onChange={(event) => setDraftIsStarred(event.target.checked)} />
+                  </label>
+                  <label className="toggle-field">
+                    <span>○ 日期画圈</span>
+                    <input type="checkbox" checked={draftIsCircled} onChange={(event) => setDraftIsCircled(event.target.checked)} />
+                  </label>
+                  <label className="toggle-field">
+                    <span>▣ 格子高亮</span>
                     <input type="checkbox" checked={draftHighlight} onChange={(event) => setDraftHighlight(event.target.checked)} />
                   </label>
                   {draftHighlight && (
@@ -1858,16 +1908,7 @@ function App() {
                       <output>{draftHighlightColor.toUpperCase()}</output>
                     </label>
                   )}
-                  <label className="customize-select-field">
-                    <span>日期标记</span>
-                    <select value={draftMarker} onChange={(event) => setDraftMarker(event.target.value)}>
-                      <option value="none">无</option>
-                      <option value="dot">圆点</option>
-                      <option value="circle">圆圈</option>
-                      <option value="star">星标</option>
-                    </select>
-                  </label>
-                  {draftMarker !== 'none' && (
+                  {(draftIsStarred || draftIsCircled) && (
                     <label className="color-field compact">
                       <span>标记颜色</span>
                       <input type="color" value={draftMarkerColor} onChange={(event) => setDraftMarkerColor(event.target.value)} />
@@ -1905,14 +1946,15 @@ function App() {
               </>
             ) : (
               <>
-                {(selectedEntry?.highlight || (selectedEntry?.marker && selectedEntry.marker !== 'none')) && (
+                {(selectedEntry?.highlight || isEntryStarred(selectedEntry) || isEntryCircled(selectedEntry) || selectedEntry?.marker === 'dot') && (
                   <div className="view-decoration" style={{ backgroundColor: selectedEntry.highlight ? selectedEntry.highlightColor : 'transparent' }}>
                     <span
-                      className={selectedEntry.marker === 'circle' ? 'circle-marker' : ''}
+                      className={isEntryCircled(selectedEntry) ? 'circle-marker' : ''}
                       style={{ color: selectedEntry.markerColor, borderColor: selectedEntry.markerColor }}
                     >
-                      {selectedEntry.marker === 'circle' ? selectedDate.getDate() : getMarkerSymbol(selectedEntry.marker)}
+                      {selectedDate.getDate()}
                     </span>
+                    {isEntryStarred(selectedEntry) && <span className="day-marker star" style={{ color: selectedEntry.markerColor }}>★</span>}
                   </div>
                 )}
                 {savedPhoto && (

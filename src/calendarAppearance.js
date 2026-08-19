@@ -15,18 +15,6 @@ export const defaultMonthAppearance = {
   headerTextColor: '#62695f',
   cornerStyle: 'slightly-rounded',
   cellGap: 'none',
-  pageRatio: 'default',
-  orientation: 'landscape',
-  customRatioWidth: 5,
-  customRatioHeight: 7,
-}
-
-export const PAGE_RATIOS = {
-  default: 3 / 2,
-  '4:3': 4 / 3,
-  '3:2': 3 / 2,
-  '16:9': 16 / 9,
-  '1:1': 1,
 }
 
 export function getMonthAppearance(monthSettings, monthKey) {
@@ -38,71 +26,23 @@ export function getMonthAppearance(monthSettings, monthKey) {
   void customWidth
   void customHeight
   void showNotes
-  const customRatioWidth = Number(currentSettings.customRatioWidth)
-  const customRatioHeight = Number(currentSettings.customRatioHeight)
+  // Old page-ratio fields are intentionally ignored. Keeping them in saved
+  // localStorage is harmless and avoids touching unrelated month data.
+  const { pageRatio, orientation, customRatioWidth, customRatioHeight, pageWidth, pageHeight, ...appearanceSettings } = currentSettings
+  void pageRatio
+  void orientation
+  void customRatioWidth
+  void customRatioHeight
+  void pageWidth
+  void pageHeight
   return {
     ...defaultMonthAppearance,
-    ...currentSettings,
-    photoRatio: photoRatios[currentSettings.photoRatio] ? currentSettings.photoRatio : '1:1',
-    noteLines: [1, 2, 3].includes(Number(currentSettings.noteLines))
-      ? Number(currentSettings.noteLines)
+    ...appearanceSettings,
+    photoRatio: photoRatios[appearanceSettings.photoRatio] ? appearanceSettings.photoRatio : '1:1',
+    noteLines: [1, 2, 3].includes(Number(appearanceSettings.noteLines))
+      ? Number(appearanceSettings.noteLines)
       : defaultMonthAppearance.noteLines,
-    pageRatio: Object.hasOwn(PAGE_RATIOS, currentSettings.pageRatio) || currentSettings.pageRatio === 'custom'
-      ? currentSettings.pageRatio
-      : defaultMonthAppearance.pageRatio,
-    orientation: ['landscape', 'portrait'].includes(currentSettings.orientation)
-      ? currentSettings.orientation
-      : defaultMonthAppearance.orientation,
-    customRatioWidth: Number.isFinite(customRatioWidth)
-      ? customRatioWidth
-      : defaultMonthAppearance.customRatioWidth,
-    customRatioHeight: Number.isFinite(customRatioHeight)
-      ? customRatioHeight
-      : defaultMonthAppearance.customRatioHeight,
   }
-}
-
-export function getPageLayout(appearance) {
-  const customWidth = Number(appearance.customRatioWidth)
-  const customHeight = Number(appearance.customRatioHeight)
-  const baseRatio = appearance.pageRatio === 'custom'
-    ? customWidth / customHeight
-    : PAGE_RATIOS[appearance.pageRatio] || PAGE_RATIOS.default
-  const validRatio = Number.isFinite(baseRatio) && baseRatio > 0
-    ? baseRatio
-    : PAGE_RATIOS.default
-
-  const isLandscape = appearance.orientation === 'landscape'
-  const aspectRatio = isLandscape
-    ? Math.max(validRatio, 1 / validRatio)
-    : Math.min(validRatio, 1 / validRatio)
-
-  return { aspectRatio }
-}
-
-export function getFittedCalendarSize(availableWidth, availableHeight, aspectRatio) {
-  if (!aspectRatio || availableWidth <= 0 || availableHeight <= 0) {
-    return null
-  }
-
-  if (availableWidth / availableHeight > aspectRatio) {
-    return {
-      height: availableHeight,
-      width: availableHeight * aspectRatio,
-    }
-  }
-
-  return {
-    height: availableWidth / aspectRatio,
-    width: availableWidth,
-  }
-}
-
-export function getRatioExportDimensions(appearance, longEdge = 2400) {
-  const { aspectRatio } = getPageLayout(appearance)
-  return aspectRatio >= 1
-    ? { height: Math.round(longEdge / aspectRatio), width: longEdge }
-    : { height: longEdge, width: Math.round(longEdge * aspectRatio) }
 }
 
 export function getPhotoFrameSize(ratioName, maxWidth, maxHeight) {

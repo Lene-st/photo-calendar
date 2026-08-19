@@ -271,37 +271,6 @@ body {
   font-size: 0.82rem;
 }
 
-.custom-ratio-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.custom-ratio-fields label {
-  display: grid;
-  gap: 6px;
-  color: #566052;
-  font-size: 0.78rem;
-}
-
-.custom-ratio-fields input {
-  box-sizing: border-box;
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #c9c2b2;
-  border-radius: 3px;
-  color: #3f443c;
-  background: #fffdf8;
-  font: inherit;
-}
-
-.settings-error {
-  grid-column: 1 / -1;
-  margin: 0;
-  color: #965a4c;
-  font-size: 0.78rem;
-}
-
 .month-button {
   display: inline-flex;
   align-items: center;
@@ -409,6 +378,7 @@ body {
 
 .date-header {
   position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: var(--marker-gap, 4px);
@@ -461,6 +431,12 @@ body {
   background-color: #f3efe5;
 }
 
+.day-cell.is-highlighted .date-button,
+.day-cell.is-highlighted .date-button:hover,
+.day-cell.is-highlighted.today .date-header {
+  background-color: var(--day-highlight-color);
+}
+
 .day-thumbnail {
   display: block;
   width: 100%;
@@ -500,6 +476,8 @@ body {
 }
 
 .day-marker {
+  position: relative;
+  z-index: 3;
   flex: 0 0 auto;
   font-size: var(--marker-star-size, 0.8em);
   line-height: 1;
@@ -515,6 +493,8 @@ body {
 }
 
 .circle-marker {
+  position: relative;
+  z-index: 3;
   display: inline-grid;
   flex: 0 0 var(--circle-size, 1.6em);
   width: var(--circle-size, 1.6em);
@@ -852,6 +832,13 @@ body {
 .note-field textarea:focus-visible {
   outline: 3px solid rgba(106, 125, 98, 0.3);
   outline-offset: 2px;
+}
+
+.day-decoration-fields h3 {
+  margin: 0;
+  color: #566052;
+  font-size: 0.92rem;
+  font-weight: 700;
 }
 
 .note-calendar-toggle {
@@ -1259,10 +1246,6 @@ body {
 
   .color-field {
     grid-template-columns: minmax(0, 1fr) 38px 76px;
-  }
-
-  .calendar.editor-calendar .day-cell {
-    min-height: var(--day-cell-height, 80px);
   }
 
   .weekday {

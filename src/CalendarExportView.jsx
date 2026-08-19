@@ -1,15 +1,13 @@
 import {
   exportViewWidth,
-  getExportViewHeight,
 } from './calendarExportLayout.js'
 import {
   getCellGap,
   getCornerRadius,
   getMarkerSymbol,
-  getPageLayout,
   getPhotoFrameSize,
 } from './calendarAppearance.js'
-import { calculateCalendarLayout, calculateCellContentLayout } from './calendarLayout.js'
+import { calculateCellContentLayout, calculateEditorCalendarLayout } from './calendarLayout.js'
 
 function ExportPhoto({ photo, frame, clipId }) {
   const crop = photo.crop
@@ -60,17 +58,17 @@ function getNoteLines(note, maxLines, maxCharacters) {
 
 export default function CalendarExportView({ calendar, svgRef }) {
   const appearance = calendar.appearance
-  const pageLayout = getPageLayout(appearance)
-  const height = getExportViewHeight(calendar.rows, pageLayout.aspectRatio)
-  const cellGap = getCellGap(appearance.cellGap, 1.5)
-  const layout = calculateCalendarLayout({
-    paperWidth: exportViewWidth,
-    paperHeight: height,
+  const cellGap = getCellGap(appearance.cellGap)
+  const layout = calculateEditorCalendarLayout({
+    calendarWidth: exportViewWidth,
     weekCount: calendar.rows,
     cellGap,
     photoRatio: calendar.photoRatioName,
-    noteLines: appearance.noteLines,
+    noteLines: calendar.days.some((entry) => entry?.note && entry.showNoteInCalendar)
+      ? appearance.noteLines
+      : 0,
   })
+  const height = layout.calendarHeight
   const {
     cellHeight,
     cellWidth,
@@ -82,7 +80,7 @@ export default function CalendarExportView({ calendar, svgRef }) {
     weekdayFontSize,
     weekdayHeaderHeight: weekdayHeight,
   } = layout
-  const cornerRadius = getCornerRadius(appearance.cornerStyle) * 1.5
+  const cornerRadius = getCornerRadius(appearance.cornerStyle)
   const gridY = pagePadding + titleHeight + sectionGap + weekdayHeight + sectionGap
 
   return (
@@ -206,11 +204,11 @@ export default function CalendarExportView({ calendar, svgRef }) {
             </defs>
             {entry.photo && <ExportPhoto photo={entry.photo} frame={frame} clipId={clipId} />}
             <text
-              x={entry.marker === 'circle'
+              x={entry.isCircled
                 ? cellX + padding + layout.circleSize / 2
                 : cellX + padding}
               y={cellY + dateHeaderHeight / 2}
-              textAnchor={entry.marker === 'circle' ? 'middle' : 'start'}
+              textAnchor={entry.isCircled ? 'middle' : 'start'}
               dominantBaseline="central"
               fill={appearance.dateTextColor}
               fontFamily="Arial, sans-serif"
@@ -219,13 +217,16 @@ export default function CalendarExportView({ calendar, svgRef }) {
             >
               {entry.day}
             </text>
-            {entry.marker === 'circle' && (
+            {entry.isCircled && (
               <circle cx={cellX + padding + layout.circleSize / 2} cy={cellY + dateHeaderHeight / 2} r={layout.circleSize / 2} fill="none" stroke={entry.markerColor} strokeWidth={layout.circleBorderWidth} />
             )}
-            {entry.marker !== 'none' && entry.marker !== 'circle' && (
-              <text x={cellX + padding + dateFontSize + layout.markerGap} y={cellY + dateHeaderHeight / 2} dominantBaseline="central" fill={entry.markerColor} fontSize={entry.marker === 'dot' ? layout.markerDotSize : layout.markerStarSize}>
+            {entry.marker === 'dot' && (
+              <text x={cellX + padding + dateFontSize + layout.markerGap} y={cellY + dateHeaderHeight / 2} dominantBaseline="central" fill={entry.markerColor} fontSize={layout.markerDotSize}>
                 {getMarkerSymbol(entry.marker)}
               </text>
+            )}
+            {entry.isStarred && (
+              <text x={cellX + padding + (entry.isCircled ? layout.circleSize : dateFontSize) + layout.markerGap} y={cellY + dateHeaderHeight / 2} dominantBaseline="central" fill={entry.markerColor} fontFamily="Arial, sans-serif" fontSize={layout.markerStarSize}>★</text>
             )}
             {noteLines.length > 0 && (
               <text
